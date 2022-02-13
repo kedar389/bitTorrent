@@ -39,7 +39,6 @@ class Decoder():
             return self._decode_string()
 
         elif char == TOKEN_TERMINATOR:
-            self._consume_token()
             return None
 
         else:
@@ -92,7 +91,7 @@ class Decoder():
 
         while( (data := self.decode()) != None ):
             decoded_list.append(data)
-
+        self._consume_token()
         return decoded_list
 
     def _decode_dictionary(self):
@@ -100,11 +99,10 @@ class Decoder():
 
         while (self._data[self._index: self._index + 1] != TOKEN_TERMINATOR):
             key = self.decode()
-            if not isinstance(key, bytes):
-                raise TypeError("Key should be a Binary String")
             object = self.decode()
             dict[key] = object
 
+        self._consume_token()
         return dict
 
 
@@ -147,8 +145,22 @@ class Encoder():
         return ( str(len(self._data)) + ':' + self._data ).encode()
 
     def _encode_list(self):
-        encoded_list = bytearray()
-        encoded_list += b'l'
+        encoded_list = bytearray('l','utf-8')
+        encoded_list += b''.join([Encoder(element).encode() for element in self._data])
+        encoded_list += b'e'
+
         return encoded_list
     def _encode_dict(self):
-        pass
+        encoded_dict = bytearray('d', 'utf-8')
+        for value,key in self._data.items():
+            dict_key =  Encoder(value).encode()
+            dict_value =  Encoder(key).encode()
+
+            if dict_key and dict_value:
+                encoded_dict +=dict_key
+                encoded_dict += dict_value
+            else:
+                raise RuntimeError("Key or Value Missing")
+
+        encoded_dict += b'e'
+        return encoded_dict
