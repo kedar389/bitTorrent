@@ -4,6 +4,11 @@ from collections import namedtuple
 
 TorrentFile = namedtuple("TorrentFile",['name', 'length'])
 
+'''Wrapper class around Decoder,
+ This class contains info about torrent file in structure of OrderedDictionary'''
+
+
+
 class Torrent():
 
 
@@ -15,10 +20,11 @@ class Torrent():
             meta_info = file.read()
             self._torrent_meta_info = Decoder(meta_info).decode()
 
-
+            '''trackers needs info part of torrent file as SHA1 hash, 
+            so you encode the info part back to bencode and then hash it in SHA1 '''
             info = Encoder(self._torrent_meta_info[b'info']).encode()
-            self.info_hash = sha1(info).digest()
 
+            self.info_hash = sha1(info).digest()
             self._identify_files_to_download()
 
     def _identify_files_to_download(self):
@@ -43,6 +49,7 @@ class Torrent():
 
     @property
     def announce(self):
+        "Tracker URL"
         return self._torrent_meta_info[b'announce'].decode('utf-8')
 
     @property

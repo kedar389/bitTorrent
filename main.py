@@ -1,4 +1,8 @@
-from bencoding import Decoder,Encoder
+import asyncio
+import random
+
+from torrent import Torrent
+from tracker import Tracker
 
 
 
@@ -7,15 +11,21 @@ from bencoding import Decoder,Encoder
 
 
 if __name__ == '__main__':
+        torrent1 = Torrent('C:\\Users\\RADEK_RYZEN\\Downloads\\Partisans 1941 [FitGirl Repack].torrent')
+        torrent2 = Torrent('C:\\Users\\RADEK_RYZEN\\Downloads\\ubuntu-21.10-desktop-amd64.iso.torrent')
 
-    print(Encoder(123).encode())
-    print(Encoder(b'Middle Earth').encode())
-    print(Encoder(['spam', 'eggs', 123]).encode())
-    '''
-    with open('C:\\Users\\RADEK_RYZEN\\Downloads\\ubuntu-16.04-desktop-amd64.iso.torrent', 'rb') as f:
-        meta_info = f.read()
-        torrent = Decoder(meta_info).decode()
-        print(torrent)
-    '''
+
+
+        loop = asyncio.get_event_loop()
+        tracker = Tracker(torrent2)
+        loop.run_until_complete(loop.create_task(tracker.connect()))
+
+        loop.run_until_complete(tracker.close_connection())
+
+
+
+
+
+
 
 
