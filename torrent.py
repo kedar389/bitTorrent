@@ -21,7 +21,7 @@ class Torrent():
             self._torrent_meta_info = Decoder(meta_info).decode()
 
             '''trackers needs info part of torrent file as SHA1 hash, 
-            so you encode the info part back to bencode and then hash it in SHA1 '''
+            so you encode the info part back to bencode and then hash it to SHA1 '''
             info = Encoder(self._torrent_meta_info[b'info']).encode()
 
             self.info_hash = sha1(info).digest()

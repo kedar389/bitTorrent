@@ -83,14 +83,14 @@ class Tracker():
             data = await response.read()
 
 
-            print(TrackerResponse(data).peers)
+
             return TrackerResponse(data)
 
 
     def _create_peer_id(self):
         '''Creates unique id for client'''
         '''TD is for name of the client,could be anything you want'''
-        return "-PC0001-" + "".join([ str(random.randint(0,9)) for _ in range(0,12)])
+        return "-TD0001-" + "".join([ str(random.randint(0,9)) for _ in range(0,12)])
 
 
     def _build_tracker_request_params(self):

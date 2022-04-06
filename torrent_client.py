@@ -2,11 +2,12 @@ import asyncio
 
 from torrent import Torrent
 from tracker import Tracker
-from queue import Queue
+from asyncio import Queue
 from time import time
+from protocol import PeerConnection
 
 
-MAXIMUM_PEERS = 30
+MAXIMUM_PEER_CONNECTIONS = 30
 
 class TorrentClient:
 
@@ -15,16 +16,27 @@ class TorrentClient:
         self._torrent_info = Torrent(torrent_path)
         self.tracker = Tracker(self._torrent_info)
         self.available_peers = Queue()
-        self.peer_list = []
+
+        self.peer_conections = []
+
         self.aborted = False
 
     async def start(self):
+
+        "TODO try to put it in constructor"
+        self.peers = [PeerConnection(available_peers=self.available_peers,
+                                     info_hash=self.tracker.torrent.info_hash,
+                                     client_id=self.tracker.peer_id,
+                                     piece_manager=None,
+                                     on_block_retrieved=None)
+                      for _ in range(MAXIMUM_PEER_CONNECTIONS)]
 
         '''Base interval'''
         interval = 60 * 15
         previous_announce = None
 
         while True:
+            "TODO if downloaded"
             if (self.aborted):
                 break
 
@@ -47,7 +59,13 @@ class TorrentClient:
             else:
                 await asyncio.sleep(5)
 
+        await self._stop()
+
 
     def _clear_queue(self):
         while not self.available_peers.empty():
             self.available_peers.get_nowait()
+
+    async def _stop(self):
+        self.abort = True
+        await self.tracker.close_connection()
