@@ -2,9 +2,10 @@ import asyncio
 import struct
 from enum import Enum
 from concurrent.futures import CancelledError
+import bitstring
 
 
-class PeerConnection():
+class PeerConnection:
 
     def __init__(self, available_peers, client_id, info_hash, piece_manager, on_block_retrieved):
         self.avaialabe_peers = available_peers
@@ -25,6 +26,9 @@ class PeerConnection():
             buffer = await self._do_handshake()
             self.state.append("choked")
             await self._send_interested()
+
+            async for msg in PeerStreamIterator(self.reader, buffer):
+
 
     async def _do_handshake(self):
         '''Send handshake which contains info about peer_id and info_hash, wait for handshake to return,
@@ -60,11 +64,11 @@ class PeerConnection():
         await self.writer.drain()
 
 
-class PeerStreamIterator():
+class PeerStreamIterator:
     '''Type of async iterator that iterates over messages that peer sends,
         Every next returns type of peerMessage.
 
-        If it will fail or connection will be closed,
+        If it fails or connection will be closed,
         Raises StopAsyncIteration and iteration will end.
     '''
 
@@ -109,6 +113,7 @@ class PeerStreamIterator():
             raise StopAsyncIteration()
 
     def parse(self):
+        # TODO messages
         """
         Tries to parse the message and return type of PeerMessage
 
@@ -135,39 +140,54 @@ class PeerStreamIterator():
 
                 def _data():
                     """Returns data of message that was read"""
-                    return  self.buffer[:message_length + length_header]
-
-
+                    return self.buffer[:message_length + length_header]
 
                 if message_id == PeerMessages.Choke:
                     _consume()
                     return Choke()
+
                 elif message_id == PeerMessages.Unchoke:
                     _consume()
                     return Unchoke()
+
                 elif message_id == PeerMessages.Interested:
                     _consume()
                     return Interested()
+
                 elif message_id == PeerMessages.NotInterested:
                     _consume()
                     return NotInterested()
 
                 elif message_id == PeerMessages.Have:
-                    pass
+                    data = _data()
+                    _consume()
+                    return Have.decode(data)
+
                 elif message_id == PeerMessages.BitField:
-                    pass
+                    data = _data()
+                    _consume()
+                    return Bitfield.decode(data)
+
                 elif message_id == PeerMessages.Request:
-                    pass
+                    data = _data()
+                    _consume()
+                    return Request.decode(data)
+
                 elif message_id == PeerMessages.Piece:
-                    pass
+                    data = _data()
+                    _consume()
+                    return Piece.decode(data)
+
                 elif message_id == PeerMessages.Cancel:
-                    pass
+                    data = _data()
+                    _consume()
+                    return Cancel.decode(data)
 
         return None
 
 
-class Handshake():
-    """Handshake is not really part of PeerMessages, it is more """
+class Handshake:
+    """Handshake is not really part of PeerMessages, it is more like start of connection,message used only once """
     """49 is length of message and 19 is currently the size for pstr which is name of Protocol used"""
 
     length = 49 + 19
@@ -188,7 +208,7 @@ class Handshake():
 
     @classmethod
     def decode(cls, response: bytes):
-        if len(response) < (Handshake.length):
+        if len(response) < Handshake.length:
             return None
 
         segments = struct.unpack('>B19s8x20s20s', response)
@@ -207,17 +227,19 @@ class PeerMessages(Enum):
     Cancel = 8
     Port = 9
 
-class KeepAlive():
+
+class KeepAlive:
     """
     The Keep-Alive message has no payload and length is set to zero.
     Message format:
         <len=0000>
     """
+
     def __str__(self):
         return 'KeepAlive'
 
 
-class Choke():
+class Choke:
     """
     The choke message is used to tell the other peer to stop send request
     messages until unchoked.
@@ -228,7 +250,8 @@ class Choke():
     def __str__(self):
         return 'Choke'
 
-class Unchoke():
+
+class Unchoke:
     """
     Unchoking a peer enables that peer to start requesting pieces from the
     remote peer.
@@ -240,7 +263,7 @@ class Unchoke():
         return 'Unchoke'
 
 
-class Interested():
+class Interested:
     """Interested message: Format <len=0001><id=2>,
     We send number 2 in big endian as bytes."""
 
@@ -251,7 +274,7 @@ class Interested():
         return 'Interested'
 
 
-class NotInterested():
+class NotInterested:
     """
     The not interested message is fix length and has no payload other than the
     message identifier. It is used to notify each other that there is no
@@ -264,28 +287,162 @@ class NotInterested():
         return 'NotInterested'
 
 
-class Have():
-    pass
+class Have:
+    """
+    Have message is sent when other peer notifies us about piece they got ready for transmiting.
+    Message format:
+        <len=0005><id=4><index>
+
+        Where index is payload that is zero based index of piece that peer has downloaded.
+    """
+
+    def __init__(self, index):
+        self.index = index
+
+    def encode(self):
+        return struct.pack('>IbI', 5, PeerMessages.Have, self.index)
+
+    @classmethod
+    def decode(cls, data: bytes):
+        index = struct.unpack('<IbI', data)[2]
+        return cls(index)
+
+    def __str__(self):
+        return 'Have'
 
 
-class Bitfield():
-    pass
+class Bitfield:
+    """
+    The BitField message payload contains a sequence of bytes that when read binary each bit will represent one piece.
+    If the bit is 1 that means that the peer have the piece with that index, while 0 means that the peer lacks that piece.
+    I.e. Each byte in the payload represent up to 8 pieces with any spare bits set to 0.
 
-class Request():
-    pass
+    Message format:
+        <len=0001+X><id=5><bitfield>
+    """
+
+    def __init__(self, data: bytes):
+        self.bitfield = bitstring.BitArray(data)
+
+    def encode(self):
+        bits_length = len(self.bitfield)
+        return struct.pack('>Ib' + str(bits_length) + 's',
+                           1 + bits_length,
+                           PeerMessages.BitField,
+                           self.bitfield)
+
+    @classmethod
+    def decode(cls, data: bytes):
+        message_length = struct.unpack('>I', data[0:4])[0]
+        bitfield_data = struct.unpack('>Ib' + str(message_length) + 's', data)[2]
+
+        return cls(bitfield_data)
+
+    def __str__(self):
+        return "Bitfield"
 
 
-class Piece():
-    pass
+class Request:
+    """
+    The request message is fixed length, and is used to request a block. The payload contains the following information:
 
-class Cancel():
-    pass
+    index: integer specifying the zero-based piece index
+    begin: integer specifying the zero-based byte offset within the piece
+    length: integer specifying the requested length.
+
+    Message format:
+        <len=0013><id=6><index><begin><length>
+    """
+
+    def __init__(self, index, begin, length):
+        self.index = index
+        self.begin = begin
+        self.length = length
+
+    def encode(self):
+        return struct.pack('>IbIII',
+                           13,
+                           PeerMessages.Request,
+                           self.index,
+                           self.begin,
+                           self.length)
+
+    @classmethod
+    def decode(cls, data: bytes):
+        message = struct.unpack('>IbIII', data)
+        return cls(message[2], message[3], message[4])
+
+    def __str__(self):
+        return "Request"
 
 
+class Piece:
+    """
+    The piece message is variable length, where X is the length of the block.
+    The payload contains the following information:
+
+        index: integer specifying the zero-based piece index
+        begin: integer specifying the zero-based byte offset within the piece
+        block: block of data, which is a subset of the piece specified by index.
+
+    Message format:
+         <len=0009+X><id=7><index><begin><block>
+    """
+
+    base_length = 9
+
+    def __init__(self, index, begin, block):
+        self.index = index
+        self.begin = begin
+        self.block = block
+
+    def encode(self):
+        message_length = Piece.base_length + len(self.block)
+        return struct.pack('>IbII' + str(len(self.block)) + 's',
+                           message_length,
+                           PeerMessages.Piece,
+                           self.index,
+                           self.begin,
+                           self.block
+                           )
+
+    @classmethod
+    def decode(cls, data: bytes):
+        block_length = struct.unpack('>I', data[:4])[0]
+        message = struct.unpack('>IbII' + str(block_length - Piece.base_length) + 's', data)
+
+        return cls(message[2], message[3], message[4])
+
+    def __str__(self):
+        return "Piece"
 
 
+class Cancel:
+    """
+    The cancel message is fixed length, and is used to cancel block requests.
+    The payload is identical to that of the "request" message.
 
+    Message format:
+        <len=0013><id=8><index><begin><length>
+    """
 
+    def __init__(self, index, begin, block):
+        self.index = index
+        self.begin = begin
+        self.block = block
 
+    def encode(self):
+        return struct.pack('>IbIII',
+                           13,
+                           PeerMessages.Cancel,
+                           self.index,
+                           self.begin,
+                           self.block)
 
+    @classmethod
+    def decode(cls, data: bytes):
+        message = struct.unpack('>IbIII', data)
+        return cls(message[2], message[3], message[4])
 
+    def __str__(self):
+        return "Cancel"
