@@ -9,7 +9,7 @@ TOKEN_TERMINATOR = b'e'
 """Class for decoding a sequence of bytes ,"""
 
 
-class Decoder():
+class Decoder:
 
     def __init__(self, data: bytes):
         if not isinstance(data, bytes):
@@ -54,7 +54,11 @@ class Decoder():
         if next_index > len(self._data):
             return None
 
-        """We have to slice to return char in represented in bytes ,otherwise we would get number representing ASCII code """
+        """
+        We have to slice to return char in represented in bytes ,
+        otherwise we would get number representing ASCII code
+         """
+
         return self._data[self._index:next_index]
 
     def _read_until_token(self, token):
@@ -89,15 +93,15 @@ class Decoder():
     def _decode_list(self):
         decoded_list = []
 
-        while( (data := self.decode()) != None ):
+        while (data := self.decode()) is not None:
             decoded_list.append(data)
         self._consume_token()
         return decoded_list
 
     def _decode_dictionary(self):
-        dict  = OrderedDict()
+        dict = OrderedDict()
 
-        while (self._data[self._index: self._index + 1] != TOKEN_TERMINATOR):
+        while self._data[self._index: self._index + 1] != TOKEN_TERMINATOR:
             key = self.decode()
             object = self.decode()
             dict[key] = object
@@ -106,17 +110,16 @@ class Decoder():
         return dict
 
 
-class Encoder():
+class Encoder:
     def __init__(self, data):
         self._data = data
 
-
     def encode(self):
 
-        if isinstance(self._data,int):
+        if isinstance(self._data, int):
             return self._encode_int()
 
-        elif isinstance(self._data,bytes):
+        elif isinstance(self._data, bytes):
             return self._encode_bytes()
 
         elif isinstance(self._data, str):
@@ -125,39 +128,36 @@ class Encoder():
         elif isinstance(self._data, list):
             return self._encode_list()
 
-        elif isinstance(self._data, dict) or isinstance(self._data, OrderedDict) :
+        elif isinstance(self._data, dict) or isinstance(self._data, OrderedDict):
             return self._encode_dict()
 
         else:
             raise RuntimeError("Cannot encode {0}".format(type(self._data)))
 
-
-
-
-
     def _encode_bytes(self):
         return (str(len(self._data)) + ':').encode() + self._data
 
     def _encode_int(self):
-       return ('i' + str(self._data) + 'e').encode()
+        return ('i' + str(self._data) + 'e').encode()
 
     def _encode_string(self):
-        return ( str(len(self._data)) + ':' + self._data ).encode()
+        return (str(len(self._data)) + ':' + self._data).encode()
 
     def _encode_list(self):
-        encoded_list = bytearray('l','utf-8')
+        encoded_list = bytearray('l', 'utf-8')
         encoded_list += b''.join([Encoder(element).encode() for element in self._data])
         encoded_list += b'e'
 
         return encoded_list
+
     def _encode_dict(self):
         encoded_dict = bytearray('d', 'utf-8')
-        for value,key in self._data.items():
-            dict_key =  Encoder(value).encode()
-            dict_value =  Encoder(key).encode()
+        for value, key in self._data.items():
+            dict_key = Encoder(value).encode()
+            dict_value = Encoder(key).encode()
 
             if dict_key and dict_value:
-                encoded_dict +=dict_key
+                encoded_dict += dict_key
                 encoded_dict += dict_value
             else:
                 raise RuntimeError("Key or Value Missing")

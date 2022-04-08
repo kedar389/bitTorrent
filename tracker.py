@@ -6,10 +6,9 @@ from bencoding import Decoder
 from struct import unpack
 
 
+class TrackerResponse:
 
-class TrackerResponse():
-
-    def __init__(self,data):
+    def __init__(self, data):
         self._response = Decoder(data).decode()
 
     @property
@@ -20,24 +19,22 @@ class TrackerResponse():
 
     @property
     def interval(self):
-        return self._respone.get(b'interval')
-
+        return self._response.get(b'interval')
 
     @property
     def incomplete(self):
-        return self._respone.get(b'incomplete')
+        return self._response.get(b'incomplete')
 
     @property
     def complete(self):
-        return self._respone.get(b'complete')
-
+        return self._response.get(b'complete')
 
     @property
     def peers(self):
         peers = self._response.get(b'peers')
 
-        if type(peers)  == list:
-            return [(peer.get(b'ip').decode(),peer.get(b'port'))  for peer in peers]
+        if type(peers) == list:
+            return [(peer.get(b'ip').decode(), peer.get(b'port')) for peer in peers]
 
         elif type(peers) == bytes:
             '''one peers is 6 bytes,4 bytes addres - 2 bytes port '''
@@ -46,20 +43,17 @@ class TrackerResponse():
             '''> is for big-endian or network order
             H is for unsigned short'''
 
-            return [(socket.inet_ntoa(p[:4]),  unpack(">H", p[4:])[0])
+            return [(socket.inet_ntoa(p[:4]), unpack(">H", p[4:])[0])
                     for p in peers]
 
         return None
-
 
     def __str__(self):
         pass
 
 
-
-
-class Tracker():
-    def __init__(self,torrent):
+class Tracker:
+    def __init__(self, torrent):
         self.downloaded = 0
         self.uploaded = 0
         self.first = True
@@ -74,7 +68,7 @@ class Tracker():
         if self.first:
             params["event"] = "started"
 
-        url  = self.torrent.announce + '?' + urlencode(params)
+        url = self.torrent.announce + '?' + urlencode(params)
         print(url)
 
         async with self.http_client.get(url) as response:
@@ -82,27 +76,23 @@ class Tracker():
                 raise ConnectionError('Unable to connect to tracker')
             data = await response.read()
 
-
-
             return TrackerResponse(data)
 
-
-    def _create_peer_id(self):
+    @staticmethod
+    def _create_peer_id():
         '''Creates unique id for client'''
         '''TD is for name of the client,could be anything you want'''
-        return "-TD0001-" + "".join([ str(random.randint(0,9)) for _ in range(0,12)])
-
+        return "-TD0001-" + "".join([str(random.randint(0, 9)) for _ in range(0, 12)])
 
     def _build_tracker_request_params(self):
         return {'info_hash': self.torrent.info_hash,
                 "peer_id": self.peer_id,
                 'uploaded': self.uploaded,
                 'downloaded': self.downloaded,
-                'left': self.torrent.torrent_size -  self.downloaded,
+                'left': self.torrent.torrent_size - self.downloaded,
                 'port': 6889,
                 'compact': 1
                 }
-
 
     async def close_connection(self):
         await self.http_client.close()

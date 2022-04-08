@@ -6,11 +6,10 @@ from asyncio import Queue
 from time import time
 from protocol import PeerConnection
 
-
 MAXIMUM_PEER_CONNECTIONS = 30
 
-class TorrentClient:
 
+class TorrentClient:
 
     def __init__(self, torrent_path):
         self._torrent_info = Torrent(torrent_path)
@@ -24,12 +23,12 @@ class TorrentClient:
     async def start(self):
 
         "TODO try to put it in constructor"
-        self.peers = [PeerConnection(available_peers=self.available_peers,
-                                     info_hash=self.tracker.torrent.info_hash,
-                                     client_id=self.tracker.peer_id,
-                                     piece_manager=None,
-                                     on_block_retrieved=None)
-                      for _ in range(MAXIMUM_PEER_CONNECTIONS)]
+        self.peer_conections = [PeerConnection(available_peers=self.available_peers,
+                                               info_hash=self.tracker.torrent.info_hash,
+                                               client_id=self.tracker.peer_id,
+                                               piece_manager=None,
+                                               on_block_retrieved=None)
+                                for _ in range(MAXIMUM_PEER_CONNECTIONS)]
 
         '''Base interval'''
         interval = 60 * 15
@@ -37,14 +36,13 @@ class TorrentClient:
 
         while True:
             "TODO if downloaded"
-            if (self.aborted):
+            if self.aborted:
                 break
 
             current_time = time.time()
 
-
             '''TODO  update first,uploaded ,downloaded'''
-            if previous_announce == None or current_time > previous_announce + interval:
+            if previous_announce is None or current_time > previous_announce + interval:
 
                 tracker_response = await  self.tracker.connect()
 
@@ -60,7 +58,6 @@ class TorrentClient:
                 await asyncio.sleep(5)
 
         await self._stop()
-
 
     def _clear_queue(self):
         while not self.available_peers.empty():

@@ -1,18 +1,16 @@
-from bencoding import Encoder,Decoder
+from bencoding import Encoder, Decoder
 from hashlib import sha1
 from collections import namedtuple
 
-TorrentFile = namedtuple("TorrentFile",['name', 'length'])
+TorrentFile = namedtuple("TorrentFile", ['name', 'length'])
 
 '''Wrapper class around Decoder,
  This class contains info about torrent file in structure of OrderedDictionary'''
 
 
+class Torrent:
 
-class Torrent():
-
-
-    def __init__(self,filepath):
+    def __init__(self, filepath):
         self.filepath = filepath
         self.files = []
 
@@ -42,7 +40,6 @@ class Torrent():
                     self._torrent_meta_info[b'info'][b'name'].decode('utf-8'),
                     self._torrent_meta_info[b'info'][b'length']))
 
-
     @property
     def is_multifile(self):
         return b'files' in self._torrent_meta_info[b'info']
@@ -60,12 +57,9 @@ class Torrent():
 
         return pieces
 
-
-
     @property
     def piece_length(self):
         return self._torrent_meta_info[b'info'][b'piece length']
-
 
     @property
     def torrent_name(self):
@@ -85,11 +79,11 @@ class Torrent():
         else:
             return self._torrent_meta_info[b'info'][b'length']
 
-
     def __str__(self):
         if self.is_multifile:
             # TODO Add support for multi-file torrents
             pass
 
         else:
-            return 'Filename {0} \n' + 'Size {1}' + 'Announce URL {2}'.format(self.torrent_name,self.torrent_size,self.announce)
+            return 'Filename {0} \n' + 'Size {1}' + 'Announce URL {2}'.format(self.torrent_name, self.torrent_size,
+                                                                              self.announce)
