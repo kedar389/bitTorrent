@@ -4,14 +4,15 @@ from enum import Enum
 from concurrent.futures import CancelledError
 import bitstring
 
-
+#TODO errors for _start, plus request piece plus messages, cancel and stop,import bitstring
 class PeerConnection:
 
     def __init__(self, available_peers, client_id, info_hash, piece_manager, on_block_retrieved):
         self.avaialabe_peers = available_peers
         self.client_id = client_id
         self.info_hash = info_hash
-        self.state = []
+        self.my_state = set()
+        self.peer_state = set()
         self.writer = None
         self.reader = None
         self.remote_id = None
@@ -19,15 +20,66 @@ class PeerConnection:
         self.future = asyncio.ensure_future(self._start())
 
     async def _start(self):
-        while "stop" not in self.state:
+        while "stop" not in self.my_state:
             ip, port = await self.avaialabe_peers.get()
 
             self.writer, self.reader = await asyncio.open_connection(ip, port)
+
+            #await handshake
             buffer = await self._do_handshake()
-            self.state.append("choked")
+            self.my_state.add("choked")
+
             await self._send_interested()
+            self.my_state.add('interested')
 
             async for msg in PeerStreamIterator(self.reader, buffer):
+                if("stop") in self.my_state:
+                    break
+
+                if type(msg) is Bitfield:
+                    pass
+
+                elif type(msg) is Choke:
+                    self.my_state.add("choked")
+
+                elif type(msg) is Unchoke:
+                    if "choked" in self.peer_state:
+                        self.my_state.remove("choked")
+
+                elif type(msg) is Interested:
+                    self.peer_state.add("interested")
+
+                elif type(msg) is NotInterested:
+                    if "interested" in self.peer_state:
+                        self.peer_state.remove("interested")
+
+                elif type(msg) is KeepAlive:
+                    pass
+
+                elif type(msg) is Have:
+                    pass
+                elif type(msg) is Piece:
+                    pass
+
+                elif type(msg) is Request:
+                    # TODO Add support for sending data
+                    pass
+
+                elif type(msg) is Cancel:
+                    # TODO Add support for sending data
+                    pass
+
+                if 'choked' not in self.my_state:
+                    if 'interested' in self.my_state:
+                        if 'pending_request' not in self.my_state:
+                            self.my_state.add('pending_request')
+                            await self._request_piece()
+
+    #TODO make request for piece that u want
+    async def _request_piece(self):
+        pass
+
+
 
 
     async def _do_handshake(self):
@@ -113,7 +165,6 @@ class PeerStreamIterator:
             raise StopAsyncIteration()
 
     def parse(self):
-        # TODO messages
         """
         Tries to parse the message and return type of PeerMessage
 
