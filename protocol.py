@@ -4,8 +4,15 @@ from enum import Enum
 from concurrent.futures import CancelledError
 import bitstring
 
+
+#size is specified by bittorent specification and is agreed upon by all implementers of bittorent protocol.
+REQUEST_SIZE = 2 ** 14
+
+
 #TODO errors for _start, plus request piece plus messages, cancel and stop,import bitstring
 class PeerConnection:
+
+
 
     def __init__(self, available_peers, client_id, info_hash, piece_manager, on_block_retrieved):
         self.avaialabe_peers = available_peers
