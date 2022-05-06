@@ -1,6 +1,7 @@
 import asyncio
 import time
 import os
+from collections import namedtuple, defaultdict
 
 from typing import Optional
 from torrent import Torrent
@@ -157,6 +158,7 @@ class Piece:
 
         return False
 
+PendingRequest = namedtuple('PendingRequest', ['block', 'added'])
 
 class PieceManager:
 
@@ -166,8 +168,10 @@ class PieceManager:
         self.total_pieces = len(torrent.pieces)
         self.peers = {}
         self.have_pieces = []
+        self.ongoing_pieces = []
+        self.pending_blocks = []
 
-        self.missing_piece = self._initialize_pieces()
+        self.missing_pieces = self._initialize_pieces()
         self.fd = os.open(self.torrent.output_file, os.O_RDWR | os.O_CREAT)
 
     def _initialize_pieces(self):
@@ -225,13 +229,146 @@ class PieceManager:
 
     def remove_peer(self, peer_id):
         """
-        Tries to remove a previously added peer (e.g. used if a peer connection
-        is dropped)
+        Tries to remove a previously added peer.
+         (e.g. used if a peer connection is dropped)
         """
         if peer_id in self.peers:
             del self.peers[peer_id]
 
 
 
-    def next_request(self):
-        pass
+    def next_request(self, peer_id) -> Block:
+        """
+        Get the next Block that should be requested from the given peer.
+        If there are no more blocks left to retrieve or if this peer does not
+        have any of the missing pieces None is returned
+        """
+        # The algorithm implemented for which piece to retrieve is a simple
+        # one. This should preferably be replaced with an implementation of
+        # "rarest-piece-first" algorithm instead.
+        #
+        # The algorithm tries to download the pieces in sequence and will try
+        # to finish started pieces before starting with new pieces.
+        #
+        # 1. Check any pending blocks to see if any request should be reissued
+        #    due to timeout
+        # 2. Check the ongoing pieces to get the next block to request
+        # 3. Check if this peer have any of the missing pieces not yet started
+        if peer_id not in self.peers:
+            return None
+
+        block = self._expired_requests(peer_id)
+        if not block:
+            block = self._next_ongoing(peer_id)
+            if not block:
+                block = self._get_rarest_piece(peer_id).next_request()
+        return block
+
+    def block_received(self, peer_id, piece_index, block_offset, data):
+        """
+        This method must be called when a block has successfully been retrieved
+        by a peer.
+        Once a full piece have been retrieved, a SHA1 hash control is made. If
+        the check fails all the pieces blocks are put back in missing state to
+        be fetched again. If the hash succeeds the partial piece is written to
+        disk and the piece is indicated as Have.
+        """
+
+
+        # Remove from pending requests
+        for index, request in enumerate(self.pending_blocks):
+            if request.block.piece == piece_index and \
+               request.block.offset == block_offset:
+                del self.pending_blocks[index]
+                break
+
+        pieces = [p for p in self.ongoing_pieces if p.index == piece_index]
+        piece = pieces[0] if pieces else None
+        if piece:
+            piece.block_received(block_offset, data)
+            if piece.is_complete():
+                if piece.is_hash_matching():
+                    self._write(piece)
+                    self.ongoing_pieces.remove(piece)
+                    self.have_pieces.append(piece)
+                    complete = (self.total_pieces -
+                                len(self.missing_pieces) -
+                                len(self.ongoing_pieces))
+
+
+    def _expired_requests(self, peer_id) -> Block:
+        """
+        Go through previously requested blocks, if any one have been in the
+        requested state for longer than `MAX_PENDING_TIME` return the block to
+        be re-requested.
+        If no pending blocks exist, None is returned
+        """
+        current = int(round(time.time() * 1000))
+        for request in self.pending_blocks:
+            if self.peers[peer_id][request.block.piece]:
+                if request.added + self.max_pending_time < current:
+
+                    # Reset expiration timer
+                    request.added = current
+                    return request.block
+        return None
+
+    def _next_ongoing(self, peer_id) -> Block:
+        """
+        Go through the ongoing pieces and return the next block to be
+        requested or None if no block is left to be requested.
+        """
+        for piece in self.ongoing_pieces:
+            if self.peers[peer_id][piece.index]:
+                # Is there any blocks left to request in this piece?
+                block = piece.next_request()
+                if block:
+                    self.pending_blocks.append(
+                        PendingRequest(block, int(round(time.time() * 1000))))
+                    return block
+        return None
+
+    def _get_rarest_piece(self, peer_id):
+        """
+        Given the current list of missing pieces, get the
+        rarest one first (i.e. a piece which fewest of its
+        neighboring peers have)
+        """
+        piece_count = defaultdict(int)
+        for piece in self.missing_pieces:
+            if not self.peers[peer_id][piece.index]:
+                continue
+            for p in self.peers:
+                if self.peers[p][piece.index]:
+                    piece_count[piece] += 1
+
+        rarest_piece = min(piece_count, key=lambda p: piece_count[p])
+        self.missing_pieces.remove(rarest_piece)
+        self.ongoing_pieces.append(rarest_piece)
+        return rarest_piece
+
+    def _next_missing(self, peer_id) -> Block:
+        """
+        Go through the missing pieces and return the next block to request
+        or None if no block is left to be requested.
+        This will change the state of the piece from missing to ongoing - thus
+        the next call to this function will not continue with the blocks for
+        that piece, rather get the next missing piece.
+        """
+        for index, piece in enumerate(self.missing_pieces):
+            if self.peers[peer_id][piece.index]:
+                # Move this piece from missing to ongoing
+                piece = self.missing_pieces.pop(index)
+                self.ongoing_pieces.append(piece)
+                # The missing pieces does not have any previously requested
+                # blocks (then it is ongoing).
+                return piece.next_request()
+        return None
+
+    def _write(self, piece):
+        """
+        Write the given piece to disk
+        """
+        pos = piece.index * self.torrent.piece_length
+        os.lseek(self.fd, pos, os.SEEK_SET)
+        os.write(self.fd, piece.data)
