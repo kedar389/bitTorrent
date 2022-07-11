@@ -3,16 +3,16 @@ import struct
 from enum import Enum
 from concurrent.futures import CancelledError
 import bitstring
+import logging
+
+# TODO errors for _start, log messages,import bitstring
 
 
-#size is specified by bittorent specification and is agreed upon by all implementers of bittorent protocol.
+# size is specified by bittorent specification and is agreed upon by all implementers of bittorent protocol.
 REQUEST_SIZE = 2 ** 14
 
 
-#TODO errors for _start, plus request piece plus messages, cancel and stop,import bitstring
 class PeerConnection:
-
-
 
     def __init__(self, available_peers, client_id, info_hash, piece_manager, on_block_retrieved):
         self.avaialabe_peers = available_peers
@@ -23,16 +23,18 @@ class PeerConnection:
         self.writer = None
         self.reader = None
         self.remote_id = None
-
+        self.piece_manager = piece_manager
+        self.on_blk = on_block_retrieved
         self.future = asyncio.ensure_future(self._start())
 
+    # TODO drop connection
     async def _start(self):
         while "stop" not in self.my_state:
             ip, port = await self.avaialabe_peers.get()
 
             self.writer, self.reader = await asyncio.open_connection(ip, port)
 
-            #await handshake
+            # await handshake
             buffer = await self._do_handshake()
             self.my_state.add("choked")
 
@@ -40,11 +42,12 @@ class PeerConnection:
             self.my_state.add('interested')
 
             async for msg in PeerStreamIterator(self.reader, buffer):
-                if("stop") in self.my_state:
+                if "stop" in self.my_state:
                     break
 
                 if type(msg) is Bitfield:
-                    pass
+                    # TODO connection should be dropped if bitfield is not of correct size
+                    self.piece_manager.add_peer(self.remote_id, msg.bitfield)
 
                 elif type(msg) is Choke:
                     self.my_state.add("choked")
@@ -64,9 +67,11 @@ class PeerConnection:
                     pass
 
                 elif type(msg) is Have:
-                    pass
+                    self.piece_manager.update_peer(self.remote_id, msg.index)
+
                 elif type(msg) is Piece:
-                    pass
+                    self.my_state.remove('pending_request')
+                    self.on_blk(self.remote_id, msg.index, msg.begin, msg.block)
 
                 elif type(msg) is Request:
                     # TODO Add support for sending data
@@ -82,19 +87,23 @@ class PeerConnection:
                             self.my_state.add('pending_request')
                             await self._request_piece()
 
-    #TODO make request for piece that u want
+            await self._close_connection()
+
     async def _request_piece(self):
-        pass
-
-
+        block_to_request = self.piece_manager.next_request(self.remote_id)
+        if block_to_request:
+            message = Request(block_to_request.offset, block_to_request.index, block_to_request.length).encode()
+            # TODO logging
+            self.writer.write(message)
+            await self.writer.drain()
 
 
     async def _do_handshake(self):
-        '''Send handshake which contains info about peer_id and info_hash, wait for handshake to return,
-        info_hash must be equal'''
+        """Send handshake which contains info about peer_id and info_hash, wait for handshake to return,
+        info_hash must be equal"""
 
         self.writer.write(Handshake(info_hash=self.info_hash, client_id=self.client_id).encode())
-        '''await drain so we do not overwrite data that we sent'''
+        # await drain to not overwrite data that we sent
         await self.writer.drain()
 
         buffer = b''
@@ -115,7 +124,7 @@ class PeerConnection:
 
         self.remote_id = response.peer_id
 
-        "return not used part of message"
+        # return not used part of message
         return response[Handshake.length:]
 
     async def _send_interested(self):
@@ -123,13 +132,30 @@ class PeerConnection:
         await self.writer.drain()
 
 
+    async def _close_connection(self):
+        #TODO send cancel message
+        if self.writer:
+            self.writer.close()
+            await self.writer.wait_closed()
+
+    def stop(self):
+        """
+        Stop this connection from the current peer (if a connection exist) and
+        from connecting to any new peer.
+        """
+
+        self.my_state.add('stop')
+        if not self.future.done():
+            self.future.cancel()
+
+
 class PeerStreamIterator:
-    '''Type of async iterator that iterates over messages that peer sends,
+    """Type of async iterator that iterates over messages that peer sends,
         Every next returns type of peerMessage.
 
         If it fails or connection will be closed,
         Raises StopAsyncIteration and iteration will end.
-    '''
+    """
 
     CHUNK_SIZE = 10 * 1024
 
@@ -140,9 +166,8 @@ class PeerStreamIterator:
     def __aiter__(self):
         return self
 
-    def __anext__(self):
+    async def __anext__(self):
 
-        """refractor"""
         while True:
             try:
                 data = await self.reader.read(PeerStreamIterator.CHUNK_SIZE)
@@ -245,8 +270,8 @@ class PeerStreamIterator:
 
 
 class Handshake:
-    """Handshake is not really part of PeerMessages, it is more like start of connection,message used only once """
-    """49 is length of message and 19 is currently the size for pstr which is name of Protocol used"""
+    """Handshake is not really part of PeerMessages, it is more like start of connection,message used only once
+     49 is length of message and 19 is currently the size for pstr which is name of Protocol used"""
 
     length = 49 + 19
 
@@ -256,16 +281,17 @@ class Handshake:
         self.info_hash = info_hash.encode('utf-8')
         self.peer_id = client_id.encode('utf-8')
 
-    '''Handshake message represented in bytes (ready to be transmitted)'''
+    # Handshake message represented in bytes (ready to be transmitted)
 
     def encode(self):
         return struct.pack('>B19s8x20s20s', self.pstrlen, self.pstr, self.info_hash, self.peer_id)
 
-    """Decodes handshake from user,
-      if length is correct tries to parse it and return handshake object , otherwise None"""
-
     @classmethod
     def decode(cls, response: bytes):
+        """
+        Decodes handshake from user,
+        if length is correct tries to parse it and return handshake object , otherwise None
+        """
         if len(response) < Handshake.length:
             return None
 

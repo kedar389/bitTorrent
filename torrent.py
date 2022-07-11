@@ -18,7 +18,7 @@ class Torrent:
             meta_info = file.read()
             self._torrent_meta_info = Decoder(meta_info).decode()
 
-            '''trackers needs info part of torrent file as SHA1 hash, 
+            '''trackers needs info part of torrent meta file as SHA1 hash, 
             so you encode the info part back to bencode and then hash it to SHA1 '''
             info = Encoder(self._torrent_meta_info[b'info']).encode()
 
@@ -44,16 +44,16 @@ class Torrent:
     def is_multifile(self):
         return b'files' in self._torrent_meta_info[b'info']
 
+    "returns Tracker URL"
     @property
     def announce(self):
-        "Tracker URL"
         return self._torrent_meta_info[b'announce'].decode('utf-8')
 
     @property
     def pieces(self):
-        '''pieces is a string consisting of concatenation of all 20 byte long SHA1 hash values, so every piece is 20 bytes long'''
-        pieces_string = self._torrent_meta_info[b'info'][b'pieces']
-        pieces = [pieces_string[i:i + 20] for i in range(0, len(pieces_string), 20)]
+        '''Every piece is long 20 bytes'''
+        pieces_sha1_tring = self._torrent_meta_info[b'info'][b'pieces']
+        pieces = [ pieces_sha1_tring[i:i + 20] for i in range(0, len(pieces_sha1_tring), 20)]
 
         return pieces
 
