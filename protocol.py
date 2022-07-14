@@ -1,6 +1,6 @@
 import asyncio
 import struct
-from enum import Enum
+from enum import IntEnum
 from concurrent.futures import CancelledError
 import bitstring
 import logging
@@ -10,6 +10,10 @@ import logging
 
 # size is specified by bittorent specification and is agreed upon by all implementers of bittorent protocol.
 REQUEST_SIZE = 2 ** 14
+
+
+class ProtocolError(BaseException):
+    pass
 
 
 class PeerConnection:
@@ -31,61 +35,75 @@ class PeerConnection:
     async def _start(self):
         while "stop" not in self.my_state:
             ip, port = await self.avaialabe_peers.get()
+            logging.info('Got assigned peer with: {ip}'.format(ip=ip))
 
-            self.writer, self.reader = await asyncio.open_connection(ip, port)
+            try:
+                self.reader,self.writer = await asyncio.open_connection(ip, port)
+                logging.info('Connection open to peer: {ip}'.format(ip=ip))
 
-            # await handshake
-            buffer = await self._do_handshake()
-            self.my_state.add("choked")
+                # await handshake
+                buffer = await self._do_handshake()
+                self.my_state.add("choked")
 
-            await self._send_interested()
-            self.my_state.add('interested')
+                await self._send_interested()
+                self.my_state.add('interested')
 
-            async for msg in PeerStreamIterator(self.reader, buffer):
-                if "stop" in self.my_state:
-                    break
+                async for msg in PeerStreamIterator(self.reader, buffer):
+                    if "stop" in self.my_state:
+                        break
 
-                if type(msg) is Bitfield:
-                    # TODO connection should be dropped if bitfield is not of correct size
-                    self.piece_manager.add_peer(self.remote_id, msg.bitfield)
+                    if type(msg) is Bitfield:
+                        # TODO connection should be dropped if bitfield is not of correct size
+                        self.piece_manager.add_peer(self.remote_id, msg.bitfield)
 
-                elif type(msg) is Choke:
-                    self.my_state.add("choked")
+                    elif type(msg) is Choke:
+                        self.my_state.add("choked")
 
-                elif type(msg) is Unchoke:
-                    if "choked" in self.peer_state:
-                        self.my_state.remove("choked")
+                    elif type(msg) is Unchoke:
+                        if "choked" in self.peer_state:
+                            self.my_state.remove("choked")
 
-                elif type(msg) is Interested:
-                    self.peer_state.add("interested")
+                    elif type(msg) is Interested:
+                        self.peer_state.add("interested")
 
-                elif type(msg) is NotInterested:
-                    if "interested" in self.peer_state:
-                        self.peer_state.remove("interested")
+                    elif type(msg) is NotInterested:
+                        if "interested" in self.peer_state:
+                            self.peer_state.remove("interested")
 
-                elif type(msg) is KeepAlive:
-                    pass
+                    elif type(msg) is KeepAlive:
+                        pass
 
-                elif type(msg) is Have:
-                    self.piece_manager.update_peer(self.remote_id, msg.index)
+                    elif type(msg) is Have:
+                        self.piece_manager.update_peer(self.remote_id, msg.index)
 
-                elif type(msg) is Piece:
-                    self.my_state.remove('pending_request')
-                    self.on_blk(self.remote_id, msg.index, msg.begin, msg.block)
+                    elif type(msg) is Piece:
+                        self.my_state.remove('pending_request')
+                        self.on_blk(self.remote_id, msg.index, msg.begin, msg.block)
 
-                elif type(msg) is Request:
-                    # TODO Add support for sending data
-                    pass
+                    elif type(msg) is Request:
+                        # TODO Add support for sending data
+                        pass
 
-                elif type(msg) is Cancel:
-                    # TODO Add support for sending data
-                    pass
+                    elif type(msg) is Cancel:
+                        # TODO Add support for sending data
+                        pass
 
-                if 'choked' not in self.my_state:
-                    if 'interested' in self.my_state:
-                        if 'pending_request' not in self.my_state:
-                            self.my_state.add('pending_request')
-                            await self._request_piece()
+                    if 'choked' not in self.my_state:
+                        if 'interested' in self.my_state:
+                            if 'pending_request' not in self.my_state:
+                                self.my_state.add('pending_request')
+                                await self._request_piece()
+
+            except ProtocolError as e:
+                logging.exception('Protocol error')
+            except (ConnectionRefusedError, TimeoutError):
+                logging.warning('Unable to connect to peer')
+            except (ConnectionResetError, CancelledError):
+                logging.warning('Connection closed')
+            except Exception as e:
+                logging.exception('An error occurred')
+                await self._close_connection()
+                raise e
 
             await self._close_connection()
 
@@ -93,28 +111,39 @@ class PeerConnection:
         block_to_request = self.piece_manager.next_request(self.remote_id)
         if block_to_request:
             message = Request(block_to_request.offset, block_to_request.index, block_to_request.length).encode()
+
+            logging.debug('Requesting block {block} for piece {piece} '
+                          'of {length} bytes from peer {peer}'.format(
+                piece=block_to_request.piece,
+                block=block_to_request.offset,
+                length=block_to_request.length,
+                peer=self.remote_id))
+
             # TODO logging
             self.writer.write(message)
             await self.writer.drain()
-
 
     async def _do_handshake(self):
         """Send handshake which contains info about peer_id and info_hash, wait for handshake to return,
         info_hash must be equal"""
 
-        self.writer.write(Handshake(info_hash=self.info_hash, client_id=self.client_id).encode())
+        handshake_message = Handshake(self.info_hash, self.client_id).encode()
+        self.writer.write(handshake_message)
         # await drain to not overwrite data that we sent
         await self.writer.drain()
 
         buffer = b''
         tries = 0
 
-        while tries < 10 and len(buffer) < Handshake.length:
+
+        #TODO make it time based
+        while  len(buffer) < Handshake.length and tries < 20 :
             tries += 1
-            buffer = await self.reader(PeerStreamIterator.CHUNK_SIZE)
+            buffer = await self.reader.read(PeerStreamIterator.CHUNK_SIZE)
 
-        response = Handshake.decode(buffer)
+        response = Handshake.decode(buffer[:Handshake.length])
 
+        #TODO validate peer_id
         if not response:
             """TODO later"""
             raise RuntimeError("Could not establish connection with peer")
@@ -122,18 +151,20 @@ class PeerConnection:
             """TODO later"""
             raise RuntimeError("Info hash is not correct")
 
-        self.remote_id = response.peer_id
+        self.remote_id = response.client_id
 
+        logging.info('Handshake with peer was successful')
         # return not used part of message
-        return response[Handshake.length:]
+        return buffer[Handshake.length:]
 
     async def _send_interested(self):
         self.writer.write(Interested().encode())
         await self.writer.drain()
 
-
     async def _close_connection(self):
-        #TODO send cancel message
+        logging.info('Closing peer {id}'.format(id=self.remote_id))
+
+        # TODO send cancel message
         if self.writer:
             self.writer.close()
             await self.writer.wait_closed()
@@ -182,8 +213,6 @@ class PeerStreamIterator:
                         if message:
                             return message
                     raise StopAsyncIteration()
-
-
 
             except ConnectionResetError:
                 raise StopAsyncIteration()
@@ -278,13 +307,19 @@ class Handshake:
     def __init__(self, info_hash, client_id):
         self.pstr = b'BitTorrent protocol'
         self.pstrlen = len(self.pstr)
-        self.info_hash = info_hash.encode('utf-8')
-        self.peer_id = client_id.encode('utf-8')
+
+        if isinstance(info_hash, str):
+            info_hash = info_hash.encode('utf-8')
+        if isinstance(client_id, str):
+            client_id = client_id.encode('utf-8')
+
+        self.info_hash = info_hash
+        self.client_id = client_id
 
     # Handshake message represented in bytes (ready to be transmitted)
 
     def encode(self):
-        return struct.pack('>B19s8x20s20s', self.pstrlen, self.pstr, self.info_hash, self.peer_id)
+        return struct.pack('>B19s8x20s20s', self.pstrlen, self.pstr, self.info_hash, self.client_id)
 
     @classmethod
     def decode(cls, response: bytes):
@@ -299,7 +334,7 @@ class Handshake:
         return cls(info_hash=segments[2], client_id=segments[3])
 
 
-class PeerMessages(Enum):
+class PeerMessages(IntEnum):
     Choke = 0
     Unchoke = 1
     Interested = 2
