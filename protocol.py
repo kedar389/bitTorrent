@@ -61,7 +61,7 @@ class PeerConnection:
                         self.my_state.add("choked")
 
                     elif type(msg) is Unchoke:
-                        if "choked" in self.peer_state:
+                        if "choked" in self.my_state:
                             self.my_state.remove("choked")
 
                     elif type(msg) is Interested:
@@ -462,7 +462,7 @@ class Bitfield:
     @classmethod
     def decode(cls, data: bytes):
         message_length = struct.unpack('>I', data[0:4])[0]
-        bitfield_data = struct.unpack('>Ib' + str(message_length) + 's', data)[2]
+        bitfield_data = struct.unpack('>Ib' + str(message_length - 1) + 's', data)[2]
 
         return cls(bitfield_data)
 
