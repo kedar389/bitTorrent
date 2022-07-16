@@ -48,7 +48,8 @@ class PeerConnection:
                 await self._send_interested()
                 self.my_state.add('interested')
 
-                async for msg in PeerStreamIterator(self.reader, buffer):
+                iterator = PeerStreamIterator(self.reader, buffer)
+                async for msg in iterator:
                     if "stop" in self.my_state:
                         break
 
@@ -93,6 +94,8 @@ class PeerConnection:
                             if 'pending_request' not in self.my_state:
                                 self.my_state.add('pending_request')
                                 await self._request_piece()
+
+
 
             except ProtocolError as e:
                 logging.exception('Protocol error')
@@ -195,7 +198,7 @@ class PeerStreamIterator:
         self.buffer = not_used_message if not_used_message else b''
 
     def __aiter__(self):
-        return self
+          return self
 
     async def __anext__(self):
 
@@ -223,7 +226,7 @@ class PeerStreamIterator:
             except Exception:
                 raise StopAsyncIteration()
 
-            raise StopAsyncIteration()
+
 
     def parse(self):
         """
@@ -244,7 +247,9 @@ class PeerStreamIterator:
                 return KeepAlive()
 
             if len(self.buffer) >= message_length:
-                message_id = struct.unpack(">b", self.buffer[4:5])
+                message_id = struct.unpack(">b", self.buffer[4:5])[0]
+                logging.debug('Message id is {id}'.format(id=message_id))
+
 
                 def _consume():
                     """Consume the read message from buffer"""
@@ -294,6 +299,10 @@ class PeerStreamIterator:
                     data = _data()
                     _consume()
                     return Cancel.decode(data)
+                else:
+                    logging.info('Unsupported message!'
+                                 'Message id is {id}'.format(id = message_id))
+
 
         return None
 
