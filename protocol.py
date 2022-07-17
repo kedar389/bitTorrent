@@ -48,8 +48,8 @@ class PeerConnection:
                 await self._send_interested()
                 self.my_state.add('interested')
 
-                iterator = PeerStreamIterator(self.reader, buffer)
-                async for msg in iterator:
+
+                async for msg in PeerStreamIterator(self.reader, buffer):
                     if "stop" in self.my_state:
                         break
 
@@ -113,7 +113,7 @@ class PeerConnection:
     async def _request_piece(self):
         block_to_request = self.piece_manager.next_request(self.remote_id)
         if block_to_request:
-            message = Request(block_to_request.offset, block_to_request.index, block_to_request.length).encode()
+            message = Request(block_to_request.piece, block_to_request.offset, block_to_request.length).encode()
 
             logging.debug('Requesting block {block} for piece {piece} '
                           'of {length} bytes from peer {peer}'.format(
