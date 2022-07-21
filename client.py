@@ -1,18 +1,13 @@
 import asyncio
-from torrent import Torrent
 from torrent_client import TorrentClient
-from tracker import Tracker
 import logging
-
-# TODO Figure out how to accept connections from peers when you are finished with downloading, or if tracker gives u them
-# TODO how to seed when you are finished , if you should break in torrent_client .
 
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     loop = asyncio.get_event_loop()
-    torrent_client = TorrentClient('C:\\Users\\RADEK_RYZEN\\Downloads\\ubuntu-21.10-desktop-amd64.iso.torrent')
+    torrent_client = TorrentClient('C:\\Users\\RADEK_RYZEN\\Downloads\\ubuntu-22.04-desktop-amd64.iso.torrent')
     task = loop.create_task(torrent_client.start())
 
     loop.run_until_complete(task)

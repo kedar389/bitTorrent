@@ -5,12 +5,8 @@ from concurrent.futures import CancelledError
 import bitstring
 import logging
 
-# TODO errors for _start, log messages,import bitstring
-
-
 # size is specified by bittorent specification and is agreed upon by all implementers of bittorent protocol.
 REQUEST_SIZE = 2 ** 14
-
 
 class ProtocolError(BaseException):
     pass
@@ -18,7 +14,7 @@ class ProtocolError(BaseException):
 
 class PeerConnection:
 
-    def __init__(self, available_peers, client_id, info_hash, piece_manager, on_block_retrieved):
+    def __init__(self, available_peers, client_id, info_hash, piece_manager, on_block_retrieved,id):
         self.avaialabe_peers = available_peers
         self.client_id = client_id
         self.info_hash = info_hash
@@ -30,16 +26,17 @@ class PeerConnection:
         self.piece_manager = piece_manager
         self.on_blk = on_block_retrieved
         self.future = asyncio.ensure_future(self._start())
+        self.id = id
 
     # TODO drop connection
     async def _start(self):
         while "stop" not in self.my_state:
             ip, port = await self.avaialabe_peers.get()
-            logging.info('Got assigned peer with: {ip}'.format(ip=ip))
+            logging.debug('Con {id} Got assigned peer with: {ip}'.format(id = self.id,ip=ip))
 
             try:
                 self.reader,self.writer = await asyncio.open_connection(ip, port)
-                logging.info('Connection open to peer: {ip}'.format(ip=ip))
+                logging.debug('Con {id} Connection open to peer: {ip}'.format(id = self.id,ip=ip))
 
                 # await handshake
                 buffer = await self._do_handshake()
@@ -79,7 +76,8 @@ class PeerConnection:
 
                     elif type(msg) is Piece:
                         self.my_state.remove('pending_request')
-                        self.on_blk(self.remote_id, msg.index, msg.begin, msg.block)
+                        #logging.info('Con number {id} got piece back'.format(id=self.id))
+                        self.on_blk(self.remote_id, msg.piece, msg.offset, msg.data)
 
                     elif type(msg) is Request:
                         # TODO Add support for sending data
@@ -93,6 +91,7 @@ class PeerConnection:
                         if 'interested' in self.my_state:
                             if 'pending_request' not in self.my_state:
                                 self.my_state.add('pending_request')
+                                #logging.info('Con number {id} requested piece'.format(id = self.id))
                                 await self._request_piece()
 
 
@@ -115,12 +114,12 @@ class PeerConnection:
         if block_to_request:
             message = Request(block_to_request.piece, block_to_request.offset, block_to_request.length).encode()
 
-            logging.debug('Requesting block {block} for piece {piece} '
-                          'of {length} bytes from peer {peer}'.format(
-                piece=block_to_request.piece,
-                block=block_to_request.offset,
-                length=block_to_request.length,
-                peer=self.remote_id))
+            #logging.debug('Requesting block {block} for piece {piece} '
+             #             'of {length} bytes from peer {peer}'.format(
+              #  piece=block_to_request.piece,
+              #  block=block_to_request.offset,
+              #  length=block_to_request.length,
+              #  peer=self.remote_id))
 
             # TODO logging
             self.writer.write(message)
@@ -138,7 +137,6 @@ class PeerConnection:
         buffer = b''
         tries = 0
 
-
         #TODO make it time based
         while  len(buffer) < Handshake.length and tries < 20 :
             tries += 1
@@ -148,15 +146,13 @@ class PeerConnection:
 
         #TODO validate peer_id
         if not response:
-            """TODO later"""
-            raise RuntimeError("Could not establish connection with peer")
+            raise ProtocolError('Unable receive and parse a handshake')
         if not response.info_hash == self.info_hash:
-            """TODO later"""
-            raise RuntimeError("Info hash is not correct")
+            raise ProtocolError('Handshake with invalid info_hash')
 
         self.remote_id = response.client_id
 
-        logging.info('Handshake with peer was successful')
+        logging.debug('Con {id} Handshake with peer was successful'.format(id = self.id))
         # return not used part of message
         return buffer[Handshake.length:]
 
@@ -165,7 +161,7 @@ class PeerConnection:
         await self.writer.drain()
 
     async def _close_connection(self):
-        logging.info('Closing peer {id}'.format(id=self.remote_id))
+        logging.debug('Con {idc} Closing peer {id}'.format(id=self.remote_id,idc = self.id))
 
         # TODO send cancel message
         if self.writer:
@@ -248,7 +244,7 @@ class PeerStreamIterator:
 
             if len(self.buffer) >= message_length:
                 message_id = struct.unpack(">b", self.buffer[4:5])[0]
-                logging.debug('Message id is {id}'.format(id=message_id))
+
 
 
                 def _consume():
@@ -509,9 +505,9 @@ class Piece:
     The piece message is variable length, where X is the length of the block.
     The payload contains the following information:
 
-        index: integer specifying the zero-based piece index
-        begin: integer specifying the zero-based byte offset within the piece
-        block: block of data, which is a subset of the piece specified by index.
+        piece: integer specifying the zero-based piece index
+        offset: integer specifying the zero-based byte offset within the piece
+        data: block of data, which is a subset of the piece specified by index.
 
     Message format:
          <len=0009+X><id=7><index><begin><block>
@@ -519,19 +515,19 @@ class Piece:
 
     base_length = 9
 
-    def __init__(self, index, begin, block):
-        self.index = index
-        self.begin = begin
-        self.block = block
+    def __init__(self, piece, offset, data):
+        self.piece = piece
+        self.offset = offset
+        self.data = data
 
     def encode(self):
-        message_length = Piece.base_length + len(self.block)
-        return struct.pack('>IbII' + str(len(self.block)) + 's',
+        message_length = Piece.base_length + len(self.data)
+        return struct.pack('>IbII' + str(len(self.data)) + 's',
                            message_length,
                            PeerMessages.Piece,
-                           self.index,
-                           self.begin,
-                           self.block
+                           self.piece,
+                           self.offset,
+                           self.data
                            )
 
     @classmethod

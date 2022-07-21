@@ -4,7 +4,7 @@ import socket
 import aiohttp
 from bencoding import Decoder
 from struct import unpack
-
+import logging
 
 class TrackerResponse:
 
@@ -69,7 +69,7 @@ class Tracker:
             params["event"] = "started"
 
         url = self.torrent.announce + '?' + urlencode(params)
-        print(url)
+        logging.info('Connecting to tracker at: ' + url)
 
         async with self.http_client.get(url) as response:
             if not response.status == 200:
@@ -80,8 +80,9 @@ class Tracker:
 
     @staticmethod
     def _create_peer_id():
-        '''Creates unique id for client'''
-        '''TD is for name of the client,could be anything you want'''
+        """Creates unique id for client,
+        TD is for name of the client,could be anything you want
+        """
         return "-TD0001-" + "".join([str(random.randint(0, 9)) for _ in range(0, 12)])
 
     def _build_tracker_request_params(self):
