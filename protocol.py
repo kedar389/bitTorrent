@@ -1,12 +1,14 @@
 import asyncio
 import struct
-from enum import IntEnum
-from concurrent.futures import CancelledError
 import bitstring
 import logging
 
-# size is specified by bittorent specification and is agreed upon by all implementers of bittorent protocol.
+from enum import IntEnum
+from concurrent.futures import CancelledError
+
+# size is specified by Bittorent specification and is agreed upon by all implementers of Bittorent protocol.
 REQUEST_SIZE = 2 ** 14
+
 
 class ProtocolError(BaseException):
     pass
@@ -14,7 +16,7 @@ class ProtocolError(BaseException):
 
 class PeerConnection:
 
-    def __init__(self, available_peers, client_id, info_hash, piece_manager, on_block_retrieved,id):
+    def __init__(self, available_peers, client_id, info_hash, piece_manager, on_block_retrieved, id):
         self.avaialabe_peers = available_peers
         self.client_id = client_id
         self.info_hash = info_hash
@@ -31,12 +33,12 @@ class PeerConnection:
     # TODO drop connection
     async def _start(self):
         while "stop" not in self.my_state:
-            ip, port = await self.avaialabe_peers.get()
-            logging.debug('Con {id} Got assigned peer with: {ip}'.format(id = self.id,ip=ip))
-
             try:
-                self.reader,self.writer = await asyncio.open_connection(ip, port)
-                logging.debug('Con {id} Connection open to peer: {ip}'.format(id = self.id,ip=ip))
+                ip, port = await self.avaialabe_peers.get()
+                logging.debug('Con {id} Got assigned peer with: {ip}'.format(id=self.id, ip=ip))
+
+                self.reader, self.writer = await asyncio.open_connection(ip, port)
+                logging.debug('Con {id} Connection open to peer: {ip}'.format(id=self.id, ip=ip))
 
                 # await handshake
                 buffer = await self._do_handshake()
@@ -45,13 +47,14 @@ class PeerConnection:
                 await self._send_interested()
                 self.my_state.add('interested')
 
-
                 async for msg in PeerStreamIterator(self.reader, buffer):
+                    # logging.info('Con number {id} Got message {message}'.format(id = self.id,message=msg.__str__()))
                     if "stop" in self.my_state:
                         break
 
                     if type(msg) is Bitfield:
-                        # TODO connection should be dropped if bitfield is not of correct size
+                        if len(msg.bitfield) != self.piece_manager.total_pieces:
+                            raise ProtocolError('Received bitfield with different size')
                         self.piece_manager.add_peer(self.remote_id, msg.bitfield)
 
                     elif type(msg) is Choke:
@@ -76,7 +79,7 @@ class PeerConnection:
 
                     elif type(msg) is Piece:
                         self.my_state.remove('pending_request')
-                        #logging.info('Con number {id} got piece back'.format(id=self.id))
+
                         self.on_blk(self.remote_id, msg.piece, msg.offset, msg.data)
 
                     elif type(msg) is Request:
@@ -91,10 +94,7 @@ class PeerConnection:
                         if 'interested' in self.my_state:
                             if 'pending_request' not in self.my_state:
                                 self.my_state.add('pending_request')
-                                #logging.info('Con number {id} requested piece'.format(id = self.id))
                                 await self._request_piece()
-
-
 
             except ProtocolError as e:
                 logging.exception('Protocol error')
@@ -102,26 +102,25 @@ class PeerConnection:
                 logging.warning('Unable to connect to peer')
             except (ConnectionResetError, CancelledError):
                 logging.warning('Connection closed')
-            except Exception as e:
+            except Exception(BaseException) as e:
                 logging.exception('An error occurred')
-                await self._close_connection()
-                raise e
 
+            logging.debug('Con {id} dropped connection'.format(id=self.id))
             await self._close_connection()
+        logging.debug('Task dropped'.format(id=self.id))
 
     async def _request_piece(self):
         block_to_request = self.piece_manager.next_request(self.remote_id)
         if block_to_request:
             message = Request(block_to_request.piece, block_to_request.offset, block_to_request.length).encode()
 
-            #logging.debug('Requesting block {block} for piece {piece} '
-             #             'of {length} bytes from peer {peer}'.format(
-              #  piece=block_to_request.piece,
-              #  block=block_to_request.offset,
-              #  length=block_to_request.length,
-              #  peer=self.remote_id))
+            # logging.debug('Requesting block {block} for piece {piece} '
+            #             'of {length} bytes from peer {peer}'.format(
+            #  piece=block_to_request.piece,
+            #  block=block_to_request.offset,
+            #  length=block_to_request.length,
+            #  peer=self.remote_id))
 
-            # TODO logging
             self.writer.write(message)
             await self.writer.drain()
 
@@ -137,14 +136,14 @@ class PeerConnection:
         buffer = b''
         tries = 0
 
-        #TODO make it time based
-        while  len(buffer) < Handshake.length and tries < 20 :
+        # TODO make it time based
+        while len(buffer) < Handshake.length and tries < 20:
             tries += 1
             buffer = await self.reader.read(PeerStreamIterator.CHUNK_SIZE)
 
         response = Handshake.decode(buffer[:Handshake.length])
 
-        #TODO validate peer_id
+        # TODO validate peer_id
         if not response:
             raise ProtocolError('Unable receive and parse a handshake')
         if not response.info_hash == self.info_hash:
@@ -152,7 +151,7 @@ class PeerConnection:
 
         self.remote_id = response.client_id
 
-        logging.debug('Con {id} Handshake with peer was successful'.format(id = self.id))
+        logging.debug('Con {id} Handshake with peer was successful'.format(id=self.id))
         # return not used part of message
         return buffer[Handshake.length:]
 
@@ -161,7 +160,7 @@ class PeerConnection:
         await self.writer.drain()
 
     async def _close_connection(self):
-        logging.debug('Con {idc} Closing peer {id}'.format(id=self.remote_id,idc = self.id))
+        logging.debug('Con {idc} Closing peer {id}'.format(id=self.remote_id, idc=self.id))
 
         # TODO send cancel message
         if self.writer:
@@ -194,7 +193,7 @@ class PeerStreamIterator:
         self.buffer = not_used_message if not_used_message else b''
 
     def __aiter__(self):
-          return self
+        return self
 
     async def __anext__(self):
 
@@ -222,8 +221,6 @@ class PeerStreamIterator:
             except Exception:
                 raise StopAsyncIteration()
 
-
-
     def parse(self):
         """
         Tries to parse the message and return type of PeerMessage
@@ -240,12 +237,11 @@ class PeerStreamIterator:
             message_length = struct.unpack(">I", self.buffer[0:4])[0]
 
             if message_length == 0:
+                self.buffer = self.buffer[length_header:]
                 return KeepAlive()
 
             if len(self.buffer) >= message_length:
                 message_id = struct.unpack(">b", self.buffer[4:5])[0]
-
-
 
                 def _consume():
                     """Consume the read message from buffer"""
@@ -297,9 +293,7 @@ class PeerStreamIterator:
                     return Cancel.decode(data)
                 else:
                     logging.info('Unsupported message!'
-                                 'Message id is {id}'.format(id = message_id))
-
-
+                                 'Message id is {id}'.format(id=message_id))
         return None
 
 
