@@ -10,7 +10,7 @@ from PieceManager import PieceManager
 
 
 class TorrentClient:
-    maximum_peer_connections = 35
+    maximum_peer_connections = 40
 
     def __init__(self, torrent_path):
         self._torrent_info = Torrent(torrent_path)
@@ -39,7 +39,8 @@ class TorrentClient:
 
         while True:
             # TODO break if downloaded,maybe continue to seed further?
-            if self.aborted:
+            if self.piece_manager.complete:
+                logging.info("Torrent finished")
                 break
 
             current_time = time.time()
@@ -68,7 +69,7 @@ class TorrentClient:
 
     async def _stop(self):
         self.aborted = True
-        self.piece_manager.close()
+        #self.piece_manager.close()
         for peer_con in self.peer_conections:
             peer_con.stop()
         await self.tracker.close_connection()
