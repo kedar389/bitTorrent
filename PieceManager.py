@@ -3,7 +3,7 @@ import time
 import os
 
 from typing import Optional
-from collections import namedtuple, defaultdict
+from collections import namedtuple
 from hashlib import sha1
 from math import ceil
 from protocol import REQUEST_SIZE
