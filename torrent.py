@@ -73,6 +73,13 @@ class Torrent:
     def announce(self):
         return self._torrent_meta_info[b'announce'].decode('utf-8')
 
+    @property
+    def announce_list(self):
+        announce_list = []
+        for announce in self._torrent_meta_info[b'announce-list']:
+            announce_list.append(str(announce[0],'utf-8'))
+        return announce_list
+
     def __str__(self):
         if self.is_multifile:
             # TODO Add support for multi-file torrents
