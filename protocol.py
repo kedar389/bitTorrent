@@ -48,13 +48,13 @@ class PeerConnection:
                 self.my_state.add('interested')
 
                 async for msg in PeerStreamIterator(self.reader, buffer):
-                    # logging.info('Con number {id} Got message {message}'.format(id = self.id,message=msg.__str__()))
+                    logging.debug('Con number {id} Got message {message}'.format(id = self.id,message=msg.__str__()))
                     if "stop" in self.my_state:
                         break
 
                     if type(msg) is Bitfield:
-                        if len(msg.bitfield) != self.piece_manager.total_pieces:
-                            raise ProtocolError('Received bitfield with different size')
+                        #if len(msg.bitfield) != self.piece_manager.total_pieces:
+                            #raise ProtocolError('Received bitfield with different size')
                         self.piece_manager.add_peer(self.remote_id, msg.bitfield)
 
                     elif type(msg) is Choke:
