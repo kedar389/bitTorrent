@@ -3,7 +3,7 @@ import time
 import logging
 
 from torrent import Torrent
-from tracker import Tracker
+from tracker import TrackerManager
 from asyncio import Queue
 from protocol import PeerConnection
 from PieceManager import PieceManager
@@ -14,7 +14,7 @@ class TorrentClient:
 
     def __init__(self, torrent_path):
         self._torrent_info = Torrent(torrent_path)
-        self.tracker = Tracker(self._torrent_info)
+        self.tracker = TrackerManager(self._torrent_info)
         # When we call the tracker we get list of availabe peers that we can connect to
         self.available_peers = Queue()
         # These are active connections that we are connected to.
@@ -27,15 +27,12 @@ class TorrentClient:
 
         logging.info("starting...")
         self.peer_conections = [PeerConnection(available_peers=self.available_peers,
-                                               info_hash=self.tracker.torrent.info_hash,
+                                               info_hash=self._torrent_info.info_hash,
                                                client_id=self.tracker.peer_id,
                                                piece_manager=self.piece_manager,
                                                on_block_retrieved=self._on_block_retrieved,
-                                               id = num)
+                                               id=num)
                                 for num in range(TorrentClient.maximum_peer_connections)]
-        # Base interval
-        interval = 60 * 15
-        previous_announce = None
 
         while True:
             # TODO break if downloaded,maybe continue to seed further?
@@ -43,20 +40,9 @@ class TorrentClient:
                 logging.info("Torrent finished")
                 break
 
-            current_time = time.time()
-
-            #TODO  update first,uploaded ,downloaded
-            if previous_announce is None or current_time > previous_announce + interval:
-
-                tracker_response = await self.tracker.connect()
-
-                if tracker_response:
-                    previous_announce = current_time
-                    interval = tracker_response.interval
-                    self._clear_queue()
-                    for peer in tracker_response.peers:
-                        self.available_peers.put_nowait(peer)
-                    self.tracker.first = False
+            if self.available_peers.qsize() == 0:
+                # TODO  update uploaded ,downloaded
+                await self.tracker.connect(0, 0,self.available_peers)
 
             else:
                 await asyncio.sleep(5)
@@ -69,10 +55,9 @@ class TorrentClient:
 
     async def _stop(self):
         self.aborted = True
-        #self.piece_manager.close()
+        # self.piece_manager.close()
         for peer_con in self.peer_conections:
             peer_con.stop()
-        await self.tracker.close_connection()
 
     # TODO remove later
     def _on_block_retrieved(self, peer_id, piece_index, block_offset, data):
@@ -87,4 +72,3 @@ class TorrentClient:
         self.piece_manager.block_received(
             peer_id=peer_id, piece_index=piece_index,
             block_offset=block_offset, data=data)
-
