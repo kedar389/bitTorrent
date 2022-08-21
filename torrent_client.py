@@ -1,5 +1,4 @@
 import asyncio
-import time
 import logging
 
 from torrent import Torrent
@@ -42,16 +41,11 @@ class TorrentClient:
 
             if self.available_peers.qsize() == 0:
                 # TODO  update uploaded ,downloaded
-                await self.tracker.connect(0, 0,self.available_peers)
+                await self.tracker.connect(0, 0, self.available_peers)
 
-            else:
-                await asyncio.sleep(5)
+            await asyncio.sleep(5)
 
         await self._stop()
-
-    def _clear_queue(self):
-        while not self.available_peers.empty():
-            self.available_peers.get_nowait()
 
     async def _stop(self):
         self.aborted = True
