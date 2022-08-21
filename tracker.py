@@ -1,17 +1,17 @@
 import asyncio
 import random
-import logging
 import socket
 import struct
 import time
-import aiohttp
 from collections import namedtuple
-
-from typing import Optional
 from enum import IntEnum
-from urllib.parse import urlencode, urlparse
-from bencoding import Decoder
 from struct import unpack
+from typing import Optional
+from urllib.parse import urlencode, urlparse
+
+import aiohttp
+
+from bencoding import Decoder
 
 
 class DatagramReaderProtocol(asyncio.DatagramProtocol):
@@ -87,19 +87,22 @@ class UdpTrackerClient:
         transport, protocol = await asyncio.get_event_loop().create_datagram_endpoint(
             DatagramReaderProtocol, remote_addr=socket_address)
 
-        # Get connection ID
-        connect_request, transaction_id = self._create_connection_request()
-        transport.sendto(connect_request)
-        buffer = await asyncio.wait_for(protocol.recv(), UdpTrackerClient.REQUEST_TIMEOUT)
+        try:
+            # Get connection ID
+            connect_request, transaction_id = self._create_connection_request()
+            transport.sendto(connect_request)
+            buffer = await asyncio.wait_for(protocol.recv(), UdpTrackerClient.REQUEST_TIMEOUT)
 
-        connection_id = self._check_response(buffer, transaction_id, ActionType.connect)
+            connection_id = self._check_response(buffer, transaction_id, ActionType.connect)
 
-        # Get peers from announce
-        announce_req, transaction_id = self._create_announce_request(connection_id)
-        transport.sendto(announce_req)
-        buffer = await asyncio.wait_for(protocol.recv(), UdpTrackerClient.REQUEST_TIMEOUT)
+            # Get peers from announce
+            announce_req, transaction_id = self._create_announce_request(connection_id)
+            transport.sendto(announce_req)
+            buffer = await asyncio.wait_for(protocol.recv(), UdpTrackerClient.REQUEST_TIMEOUT)
 
-        return self._parse_announce_response(buffer, transaction_id)
+            return self._parse_announce_response(buffer, transaction_id)
+        finally:
+            transport.close()
 
     @staticmethod
     def _create_connection_request():
@@ -201,10 +204,10 @@ class TrackerResponse:
     def peers(self):
         peers = self._response.get(b'peers')
 
-        if type(peers) == list:
+        if isinstance(peers, list):
             return [(peer.get(b'ip').decode(), peer.get(b'port')) for peer in peers]
 
-        elif type(peers) == bytes or type(peers) == bytearray:
+        elif isinstance(peers, bytes) or isinstance(peers, bytearray):
             '''one peers is 6 bytes,4 bytes addres - 2 bytes port '''
             peers = [peers[i:i + 6] for i in range(0, len(peers), 6)]
 
@@ -227,6 +230,7 @@ class TrackerManager:
         # Map urls and announce times
         self._trckr_responses = {}
 
+
     @staticmethod
     def _create_peer_id():
         """Creates unique id for client,
@@ -234,40 +238,45 @@ class TrackerManager:
         """
         return "-TD0001-" + "".join([str(random.randint(0, 9)) for _ in range(0, 12)])
 
+    # FIXME maybe do not remove duplicates in peers ?
     async def connect(self, downloaded, uploaded, peer_queue):
         """
         Contacts all trackers to get available peers
+        Removes duplicates of (ip, port)
+        Fills queue passed to it  with peers
         """
         tracker_responses = await asyncio.gather(*self._create_tracker_requests(downloaded, uploaded),
                                                  return_exceptions=True)
-
+        new_peers = set()
         for response_index, response in enumerate(tracker_responses):
             # To map results from tasks,each result corresponds to index of url in url list
             url = self._torrent.announce_list[response_index]
 
-            if type(response) is TrackerResponse and response.failure is None:
+            if isinstance(response, TrackerResponse) and response.failure is None:
                 self._trckr_responses[url] = NextAnnounce(True, time.time(), response.interval)
                 for peer in response.peers:
-                    peer_queue.put_nowait(peer)
+                    new_peers.add(peer)
             else:
                 self._trckr_responses[url] = NextAnnounce(False, None, None)
+
+        for peer in new_peers:
+            peer_queue.put_nowait(peer)
 
     def _create_tracker_requests(self, downloaded, uploaded):
         request_params = self._build_request_params(downloaded, uploaded)
         tracker_requests = []
         current_time = time.time()
 
-        for announce_url in self._torrent.announce_list:
+        for url in self._torrent.announce_list:
 
-            if announce_url not in self._trckr_responses or \
-                    (self._trckr_responses[announce_url].responded is True and current_time >
-                     self._trckr_responses[
-                         announce_url].previous_announce + self._trckr_responses[announce_url].interval):
+            if url not in self._trckr_responses or \
+                    (self._trckr_responses[url].responded and current_time >
+                     self._trckr_responses[url].previous_announce + self._trckr_responses[url].interval):
 
-                if announce_url[0:3] == 'udp':
-                    tracker_requests.append(UdpTrackerClient(announce_url, request_params).request())
-                elif announce_url[0:4] == 'http':
-                    tracker_requests.append(HttpTrackerClient(announce_url, request_params).request())
+                if url[0:3] == 'udp':
+                    tracker_requests.append(UdpTrackerClient(url, request_params).request())
+                elif url[0:4] == 'http':
+                    tracker_requests.append(HttpTrackerClient(url, request_params).request())
 
         return tracker_requests
 
