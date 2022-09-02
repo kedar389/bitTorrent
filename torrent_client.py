@@ -40,10 +40,10 @@ class TorrentClient:
                 break
 
             if self.available_peers.qsize() == 0:
-                # TODO  update uploaded ,downloaded
-                await self.tracker.connect(0, 0, self.available_peers)
-
-            await asyncio.sleep(5)
+                await self.tracker.connect(self.piece_manager.downloaded, self.piece_manager.uploaded,
+                                           self.available_peers)
+            logging.info("Number of available peers: " + str(self.available_peers.qsize()))
+            await asyncio.sleep(30)
 
         await self._stop()
 

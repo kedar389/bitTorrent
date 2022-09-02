@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import random
 import socket
 import struct
@@ -74,7 +75,7 @@ class ActionType(IntEnum):
 class UdpTrackerClient:
     MAGIC_CONNECTION_ID = 0x41727101980
     RESPONSE_HEADER_LEN = struct.calcsize('!iiq')
-    REQUEST_TIMEOUT = 10
+    REQUEST_TIMEOUT = 12
 
     def __init__(self, announce_url, params):
         self.url = announce_url
@@ -230,7 +231,6 @@ class TrackerManager:
         # Map urls and announce times
         self._trckr_responses = {}
 
-
     @staticmethod
     def _create_peer_id():
         """Creates unique id for client,
@@ -238,15 +238,18 @@ class TrackerManager:
         """
         return "-TD0001-" + "".join([str(random.randint(0, 9)) for _ in range(0, 12)])
 
-    # FIXME maybe do not remove duplicates in peers ?
     async def connect(self, downloaded, uploaded, peer_queue):
         """
         Contacts all trackers to get available peers
         Removes duplicates of (ip, port)
         Fills queue passed to it  with peers
         """
+        logging.info("Contacting trackers")
         tracker_responses = await asyncio.gather(*self._create_tracker_requests(downloaded, uploaded),
                                                  return_exceptions=True)
+
+        logging.info("Available trackers to contact: " + str(len(tracker_responses)))
+
         new_peers = set()
         for response_index, response in enumerate(tracker_responses):
             # To map results from tasks,each result corresponds to index of url in url list

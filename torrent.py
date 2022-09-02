@@ -1,6 +1,7 @@
 from bencoding import Encoder, Decoder
 from hashlib import sha1
 from collections import namedtuple
+import os
 
 '''
 Wrapper class around Decoder,
@@ -21,11 +22,13 @@ class Torrent:
             meta_info = file.read()
             self._torrent_meta_info = Decoder(meta_info).decode()
 
-        '''trackers needs info part of torrent meta file as SHA1 hash, 
-        so you encode the info part back to bencode and then hash it to SHA1 '''
-        info = Encoder(self._torrent_meta_info[b'info']).encode()
+        self._torrent_name = self._torrent_meta_info[b'info'][b'name'].decode('utf-8')
 
+        # Tracker needs info part of torrent meta file as SHA1 hash,
+        # 1.Bencode it 2.Hash it
+        info = Encoder(self._torrent_meta_info[b'info']).encode()
         self.info_hash = sha1(info).digest()
+
         self._identify_files_to_download()
         self.size = self._size()
 
@@ -39,22 +42,23 @@ class Torrent:
         """
         if self.is_multifile:
             for file in self._torrent_meta_info[b'info'][b'files']:
+                file_parts = [part.decode('utf-8') for part in file[b'path']]
+
                 self.files.append(TorrentFile(
-                    file[b'path'],
+                    os.path.join(self._torrent_name, *file_parts),
                     file[b'length']
                 ))
         else:
             self.files.append(
                 TorrentFile(
-                    self._torrent_meta_info[b'info'][b'name'].decode('utf-8'),
+                    self._torrent_name,
                     self._torrent_meta_info[b'info'][b'length']))
 
     def _size(self):
         if self.is_multifile:
             return sum(file[b'length'] for file in self._torrent_meta_info[b'info'][b'files'])
 
-        else:
-            return self._torrent_meta_info[b'info'][b'length']
+        return self._torrent_meta_info[b'info'][b'length']
 
     @property
     def pieces(self):
@@ -77,7 +81,7 @@ class Torrent:
     def announce_list(self):
         announce_list = []
         for announce in self._torrent_meta_info[b'announce-list']:
-            announce_list.append(str(announce[0],'utf-8'))
+            announce_list.append(str(announce[0], 'utf-8'))
         return announce_list
 
     def __str__(self):

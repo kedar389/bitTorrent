@@ -1,10 +1,10 @@
 import asyncio
-import struct
-import bitstring
 import logging
-
-from enum import IntEnum
+import struct
 from concurrent.futures import CancelledError
+from enum import IntEnum
+
+import bitstring
 
 # size is specified by Bittorent specification and is agreed upon by all implementers of Bittorent protocol.
 REQUEST_SIZE = 2 ** 14
@@ -30,7 +30,6 @@ class PeerConnection:
         self.future = asyncio.ensure_future(self._start())
         self.id = id
 
-    # TODO drop connection
     async def _start(self):
         while "stop" not in self.my_state:
             try:
@@ -97,13 +96,15 @@ class PeerConnection:
                                 await self._request_piece()
 
             except ProtocolError as e:
-                logging.exception('Protocol error')
-            except (ConnectionRefusedError, TimeoutError):
+                logging.warning('Protocol error:' + e.message )
+            except (ConnectionRefusedError, TimeoutError,OSError):
                 logging.warning('Unable to connect to peer')
             except (ConnectionResetError, CancelledError):
                 logging.warning('Connection closed')
-            except Exception(BaseException) as e:
+            except Exception as e:
                 logging.exception('An error occurred')
+                raise e
+
 
             logging.debug('Con {id} dropped connection'.format(id=self.id))
             await self._close_connection()
@@ -139,7 +140,7 @@ class PeerConnection:
         # TODO make it time based
         while len(buffer) < Handshake.length and tries < 20:
             tries += 1
-            buffer = await self.reader.read(PeerStreamIterator.CHUNK_SIZE)
+            buffer += await self.reader.read(PeerStreamIterator.CHUNK_SIZE)
 
         response = Handshake.decode(buffer[:Handshake.length])
 
@@ -162,7 +163,6 @@ class PeerConnection:
     async def _close_connection(self):
         logging.debug('Con {idc} Closing peer {id}'.format(id=self.remote_id, idc=self.id))
 
-        # TODO send cancel message
         if self.writer:
             self.writer.close()
             await self.writer.wait_closed()

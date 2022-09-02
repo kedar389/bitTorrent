@@ -1,11 +1,12 @@
 import logging
-import time
 import os
-
-from typing import Optional
+import time
 from collections import namedtuple
 from hashlib import sha1
 from math import ceil
+from pathlib import Path
+from typing import Optional
+
 from protocol import REQUEST_SIZE
 
 
@@ -65,7 +66,6 @@ class Piece:
             block.data = data
             block.status = Block.Retrieved
 
-
     def is_complete(self):
         """
         Checks if all blocks are downloaded and thus piece is complete
@@ -87,7 +87,6 @@ class Piece:
         return sha1(self.data).digest() == self.hash
 
 
-
 PendingRequest = namedtuple('PendingRequest', ['block', 'added'])
 
 
@@ -103,7 +102,9 @@ class PieceManager:
         self.pending_blocks = []
         self.max_pending_time = 300 * 1000  # 5 minutes
         self.missing_pieces = self._initialize_pieces()
-        #self.fd = os.open(self.torrent.torrent_name, os.O_RDWR | os.O_CREAT)
+        self.downloaded = 0
+        self.uploaded = 0
+        # self.fd = os.open(self.torrent.torrent_name, os.O_RDWR | os.O_CREAT)
         self.fd = None
 
     def _initialize_pieces(self):
@@ -113,7 +114,7 @@ class PieceManager:
 
         for index, piece_hash_value in enumerate(self.torrent.pieces):
 
-            if index  == self.total_pieces -1 and last_piece_length > 0:
+            if index == self.total_pieces - 1 and last_piece_length > 0:
                 blocks_per_last_piece = ceil(last_piece_length / REQUEST_SIZE)
                 blocks = [Block(index, offset * REQUEST_SIZE, REQUEST_SIZE)
                           for offset in range(blocks_per_last_piece)]
@@ -206,13 +207,15 @@ class PieceManager:
                 del self.pending_blocks[index]
                 break
 
+        self.downloaded += len(data)
+
         pieces = [p for p in self.ongoing_pieces if p.index == piece_index]
         piece = pieces[0] if pieces else None
         if piece:
             piece.receive_block(block_offset, data)
             if piece.is_complete():
                 if piece.is_hash_correct():
-                    #self._write(piece)
+                    self._write(piece.data,piece.index)
                     self.ongoing_pieces.remove(piece)
                     self.have_pieces.append(piece)
                     complete = (self.total_pieces -
@@ -239,7 +242,7 @@ class PieceManager:
         If no pending blocks exist, None is returned
         """
         current = int(round(time.time() * 1000))
-        for index,request in enumerate(self.pending_blocks):
+        for index, request in enumerate(self.pending_blocks):
             if self.peers[peer_id][request.block.piece]:
                 if request.added + self.max_pending_time < current:
                     # Reset expiration timer
@@ -262,8 +265,6 @@ class PieceManager:
                     return block
         return None
 
-
-
     def _next_missing(self, peer_id) -> Optional[Block]:
         """
         Go through the missing pieces and return the next block to request
@@ -282,40 +283,46 @@ class PieceManager:
                 return piece.next_request()
         return None
 
-
-    def _write(self, piece):
-        pass
+    def _write(self, data,piece_index):
         """
         Write the given piece to disk
         """
-        '''
-        #Find position in stream of pieces
-        absolute_pos = piece.index * self.torrent.piece_length
+        # Find position in stream of pieces
+        absolute_pos = piece_index * self.torrent.piece_length
 
         size_counter = 0
         file_index = 0
 
         #Find out to which file does piece belong
         for index,file in enumerate(self.torrent.files):
-            #If size is bigger of all previous files plus next file is bigger then abs pos  ,stop at this index
+            #If size  of all previous files plus next file is bigger then abs pos  ,piece starts in this file
             if size_counter + file.length > absolute_pos:
                 file_index = index
                 break
-            else:
-                size_counter += file.length
-               
-                
-                
+
+            size_counter += file.length
 
         #Find position in file
         file_pos = absolute_pos - size_counter
 
-         while :
-            #output_file = Path("/some/path/file.txt")
-            #output_file.parent.mkdir(exist_ok=True, parents=True)
-            #output_file.write("some text")
+        while len(data) > 0:
+            output_file = Path(self.torrent.files[file_index].name)
+            output_file.parent.mkdir(exist_ok=True, parents=True)
+            fd = os.open(self.torrent.files[file_index].name, os.O_RDWR|os.O_CREAT)
+            os.lseek(fd, file_pos, os.SEEK_SET)
+
+            os.write(fd, data[:self.torrent.files[file_index].length - file_pos - 1])
+            os.close(fd)
+
+            data = data[self.torrent.files[file_index].length - file_pos:]
+            file_pos = 0
+            file_index += 1
 
 
-        os.lseek(self.fd, pos, os.SEEK_SET)
-        os.write(self.fd, piece.data)
-        '''
+            #52 kb is last block
+            #we are lacking 12,288 bytes of data somewhere prob last block
+
+
+
+
+
