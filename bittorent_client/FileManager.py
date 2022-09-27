@@ -54,7 +54,7 @@ class FileManager:
             file_pos = 0
             file_index += 1
 
-
+    #TODO
     def load_downloaded_pieces(self):
         pieces = []
         for file in self.torrent.files:
