@@ -12,7 +12,7 @@ from urllib.parse import urlencode, urlparse
 
 import aiohttp
 
-from bencoding import Decoder
+from bittorent_client.bencoding import Decoder
 
 
 class DatagramReaderProtocol(asyncio.DatagramProtocol):
@@ -209,12 +209,10 @@ class TrackerResponse:
             return [(peer.get(b'ip').decode(), peer.get(b'port')) for peer in peers]
 
         elif isinstance(peers, bytes) or isinstance(peers, bytearray):
-            '''one peers is 6 bytes,4 bytes addres - 2 bytes port '''
+            # one peers is 6 bytes,4 bytes address - 2 bytes port
             peers = [peers[i:i + 6] for i in range(0, len(peers), 6)]
 
-            '''> is for big-endian or network order
-            H is for unsigned short'''
-
+            # > is for big-endian or network order
             return [(socket.inet_ntoa(p[:4]), unpack(">H", p[4:])[0])
                     for p in peers]
 
@@ -229,7 +227,7 @@ class TrackerManager:
         self.peer_id = self._create_peer_id()
         self._torrent = torrent
         # Map urls and announce times
-        self._trckr_responses = {}
+        self._tracker_responses = {}
 
     @staticmethod
     def _create_peer_id():
@@ -256,11 +254,11 @@ class TrackerManager:
             url = self._torrent.announce_list[response_index]
 
             if isinstance(response, TrackerResponse) and response.failure is None:
-                self._trckr_responses[url] = NextAnnounce(True, time.time(), response.interval)
+                self._tracker_responses[url] = NextAnnounce(True, time.time(), response.interval)
                 for peer in response.peers:
                     new_peers.add(peer)
             else:
-                self._trckr_responses[url] = NextAnnounce(False, None, None)
+                self._tracker_responses[url] = NextAnnounce(False, None, None)
 
         for peer in new_peers:
             peer_queue.put_nowait(peer)
@@ -272,9 +270,9 @@ class TrackerManager:
 
         for url in self._torrent.announce_list:
 
-            if url not in self._trckr_responses or \
-                    (self._trckr_responses[url].responded and current_time >
-                     self._trckr_responses[url].previous_announce + self._trckr_responses[url].interval):
+            if url not in self._tracker_responses or \
+                    (self._tracker_responses[url].responded and current_time >
+                     self._tracker_responses[url].previous_announce + self._tracker_responses[url].interval):
 
                 if url[0:3] == 'udp':
                     tracker_requests.append(UdpTrackerClient(url, request_params).request())
