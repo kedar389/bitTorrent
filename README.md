@@ -1,10 +1,15 @@
 # bitTorrent - Torrent CLI tool written in python
 
 Whole client is written in python using asyncio.
+
 Implemented Beps:
+
 The BitTorrent Protocol Specification (BEP 0003 ).
+
 Multitracker Metadata Extension (BEP 0012).
+
 Scrape peers from UDP or HTTP trackers (BEP 15).
+
 Tracker Returns Compact Peer Lists (BEP 0023).
 
 
@@ -26,11 +31,13 @@ What needs fixing:
 
 
 For requirements:
+
 pip install -r requirements.txt
 
 
 
 Running the program
+
 - Run: python client.py /path/to/your/file.torrent
 
 - The files will be downloaded in the same path as your client.py script.
