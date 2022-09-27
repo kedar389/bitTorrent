@@ -1,18 +1,16 @@
-from bencoding import Encoder, Decoder
+from bittorent_client.bencoding import Encoder, Decoder
 from hashlib import sha1
 from collections import namedtuple
 import os
-
-'''
-Wrapper class around Decoder,
-This class contains info about torrent 
-represented as OrderedDictionary
- '''
 
 TorrentFile = namedtuple("TorrentFile", ['name', 'length'])
 
 
 class Torrent:
+    """
+        Wrapper class around Decoder,
+        This class contains info about torrent
+    """
 
     def __init__(self, filepath):
         self.filepath = filepath

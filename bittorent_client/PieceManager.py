@@ -1,13 +1,14 @@
 import logging
-import os
 import time
 from collections import namedtuple
 from hashlib import sha1
 from math import ceil
-from pathlib import Path
-from typing import Optional
+import bitstring
 
-from protocol import REQUEST_SIZE
+from typing import Optional
+from bittorent_client.FileManager import FileManager
+
+from bittorent_client.protocol import REQUEST_SIZE
 
 
 class Block:
@@ -92,20 +93,25 @@ PendingRequest = namedtuple('PendingRequest', ['block', 'added'])
 
 class PieceManager:
 
+    # 5 minutes
+    MAX_PENDING_TIME = 300 * 1000
+
     def __init__(self, torrent):
 
         self.torrent = torrent
         self.total_pieces = len(torrent.pieces)
+        self.file_manager = FileManager(torrent)
         self.peers = {}
-        self.have_pieces = []
+
+        #TODO update when loaded pieces at start
+        self.bitfield = bitstring.BitArray(self.total_pieces)
+
         self.ongoing_pieces = []
         self.pending_blocks = []
-        self.max_pending_time = 300 * 1000  # 5 minutes
         self.missing_pieces = self._initialize_pieces()
         self.downloaded = 0
         self.uploaded = 0
-        # self.fd = os.open(self.torrent.torrent_name, os.O_RDWR | os.O_CREAT)
-        self.fd = None
+
 
     def _initialize_pieces(self):
         pieces = []
@@ -132,17 +138,13 @@ class PieceManager:
 
         return pieces
 
-    def close(self):
-        if self.fd:
-            os.close(self.fd)
-
     @property
     def complete(self):
         """
         Checks whether or not the all pieces are downloaded for this torrent.
         :return: True if all pieces are fully downloaded else False
         """
-        return len(self.have_pieces) == self.total_pieces
+        return len(self.missing_pieces) == 0
 
     def add_peer(self, peer_id, bitfield):
         """
@@ -215,9 +217,10 @@ class PieceManager:
             piece.receive_block(block_offset, data)
             if piece.is_complete():
                 if piece.is_hash_correct():
-                    self._write(piece.data,piece.index)
+                    self.file_manager.write_piece(piece.data, piece.index)
                     self.ongoing_pieces.remove(piece)
-                    self.have_pieces.append(piece)
+                    self.bitfield[piece.index] = 1
+
                     complete = (self.total_pieces -
                                 len(self.missing_pieces) -
                                 len(self.ongoing_pieces))
@@ -227,12 +230,14 @@ class PieceManager:
                             .format(complete=complete,
                                     total=self.total_pieces,
                                     per=(complete / self.total_pieces) * 100))
+                    return True
                 else:
                     logging.info('Discarding corrupt piece {index}'
                                  .format(index=piece.index))
                     piece.reset()
         else:
             logging.warning('Trying to update piece that is not ongoing!')
+        return False
 
     def _expired_requests(self, peer_id) -> Optional[Block]:
         """
@@ -244,7 +249,7 @@ class PieceManager:
         current = int(round(time.time() * 1000))
         for index, request in enumerate(self.pending_blocks):
             if self.peers[peer_id][request.block.piece]:
-                if request.added + self.max_pending_time < current:
+                if request.added + PieceManager.MAX_PENDING_TIME < current:
                     # Reset expiration timer
                     self.pending_blocks[index] = PendingRequest(request.block, current)
                     return self.pending_blocks[index].block
@@ -283,46 +288,6 @@ class PieceManager:
                 return piece.next_request()
         return None
 
-    def _write(self, data,piece_index):
-        """
-        Write the given piece to disk
-        """
-        # Find position in stream of pieces
-        absolute_pos = piece_index * self.torrent.piece_length
+    def get_piece_data(self,piece_index):
 
-        size_counter = 0
-        file_index = 0
-
-        #Find out to which file does piece belong
-        for index,file in enumerate(self.torrent.files):
-            #If size  of all previous files plus next file is bigger then abs pos  ,piece starts in this file
-            if size_counter + file.length > absolute_pos:
-                file_index = index
-                break
-
-            size_counter += file.length
-
-        #Find position in file
-        file_pos = absolute_pos - size_counter
-
-        while len(data) > 0:
-            output_file = Path(self.torrent.files[file_index].name)
-            output_file.parent.mkdir(exist_ok=True, parents=True)
-            fd = os.open(self.torrent.files[file_index].name, os.O_RDWR|os.O_CREAT)
-            os.lseek(fd, file_pos, os.SEEK_SET)
-
-            os.write(fd, data[:self.torrent.files[file_index].length - file_pos - 1])
-            os.close(fd)
-
-            data = data[self.torrent.files[file_index].length - file_pos:]
-            file_pos = 0
-            file_index += 1
-
-
-            #52 kb is last block
-            #we are lacking 12,288 bytes of data somewhere prob last block
-
-
-
-
-
+        return self.file_manager.load_piece(piece_index)

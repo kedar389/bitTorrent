@@ -1,59 +1,66 @@
 import asyncio
 import logging
 import struct
+import bitstring
 from concurrent.futures import CancelledError
 from enum import IntEnum
+from queue import Queue
+from typing import Union
 
-import bitstring
-
-# size is specified by Bittorent specification and is agreed upon by all implementers of Bittorent protocol.
+# size is specified by BitTorrent specification and is agreed upon by all implementers of BitTorrent protocol.
 REQUEST_SIZE = 2 ** 14
 
 
 class ProtocolError(BaseException):
-    pass
+    def __init__(self, *args: object):
+        super().__init__(args)
+        self.message = None
 
 
 class PeerConnection:
 
-    def __init__(self, available_peers, client_id, info_hash, piece_manager, on_block_retrieved, id):
-        self.avaialabe_peers = available_peers
+    def __init__(self, available_peers, client_id, info_hash, piece_manager, on_block_retrieved, con_id):
         self.client_id = client_id
         self.info_hash = info_hash
+        self.available_peers = available_peers
+        self.piece_manager = piece_manager
+        self.on_blk = on_block_retrieved
+        self.con_id = con_id
+
+        self.future = asyncio.ensure_future(self._start())
+
         self.my_state = set()
         self.peer_state = set()
         self.writer = None
         self.reader = None
         self.remote_id = None
-        self.piece_manager = piece_manager
-        self.on_blk = on_block_retrieved
-        self.future = asyncio.ensure_future(self._start())
-        self.id = id
+        self.have_update_queue = Queue()
 
     async def _start(self):
         while "stop" not in self.my_state:
             try:
-                ip, port = await self.avaialabe_peers.get()
-                logging.debug('Con {id} Got assigned peer with: {ip}'.format(id=self.id, ip=ip))
+                ip, port = await self.available_peers.get()
+                logging.debug('Con {id} Got assigned peer with: {ip}'.format(id=self.con_id, ip=ip))
 
                 self.reader, self.writer = await asyncio.open_connection(ip, port)
-                logging.debug('Con {id} Connection open to peer: {ip}'.format(id=self.id, ip=ip))
+                logging.debug('Con {id} Connection open to peer: {ip}'.format(id=self.con_id, ip=ip))
 
                 # await handshake
                 buffer = await self._do_handshake()
                 self.my_state.add("choked")
 
-                await self._send_interested()
+                if self.piece_manager.bitfield.any(True):
+                    await self._send_message(Bitfield(self.piece_manager.bitfield).encode())
+
+                await self._send_message(Interested().encode())
                 self.my_state.add('interested')
 
                 async for msg in PeerStreamIterator(self.reader, buffer):
-                    logging.debug('Con number {id} Got message {message}'.format(id = self.id,message=msg.__str__()))
+                    logging.debug('Con number {id} Got message {message}'.format(id=self.con_id, message=msg.__str__()))
                     if "stop" in self.my_state:
                         break
 
                     if type(msg) is Bitfield:
-                        #if len(msg.bitfield) != self.piece_manager.total_pieces:
-                            #raise ProtocolError('Received bitfield with different size')
                         self.piece_manager.add_peer(self.remote_id, msg.bitfield)
 
                     elif type(msg) is Choke:
@@ -82,45 +89,43 @@ class PeerConnection:
                         self.on_blk(self.remote_id, msg.piece, msg.offset, msg.data)
 
                     elif type(msg) is Request:
-                        # TODO Add support for sending data
-                        pass
+                        if self.piece_manager.bitfield[Request.index]:
+                            data = self.piece_manager.get_piece_data(Request.index)
+                            piece = Piece(Request.index,Request.begin,data).encode()
+                            await self._send_message(piece)
+
 
                     elif type(msg) is Cancel:
-                        # TODO Add support for sending data
+                        # TODO Add support for cancelling when endgame
                         pass
 
                     if 'choked' not in self.my_state:
                         if 'interested' in self.my_state:
+                            while not self.have_update_queue.empty():
+                                await self._send_message(Have(self.have_update_queue.get()).encode())
+
                             if 'pending_request' not in self.my_state:
                                 self.my_state.add('pending_request')
                                 await self._request_piece()
 
             except ProtocolError as e:
-                logging.warning('Protocol error:' + e.message )
-            except (ConnectionRefusedError, TimeoutError,OSError):
-                logging.warning('Unable to connect to peer')
+                logging.warning('Protocol error:' + e.message)
+            except (ConnectionRefusedError, TimeoutError, OSError) as e:
+                logging.warning('Unable to connect to peer. Reason: ' + e.message)
             except (ConnectionResetError, CancelledError):
                 logging.warning('Connection closed')
             except Exception as e:
                 logging.exception('An error occurred')
                 raise e
 
-
-            logging.debug('Con {id} dropped connection'.format(id=self.id))
+            logging.debug('Con {id} dropped connection'.format(id=self.con_id))
             await self._close_connection()
-        logging.debug('Task dropped'.format(id=self.id))
+        logging.debug('Task dropped'.format(id=self.con_id))
 
     async def _request_piece(self):
         block_to_request = self.piece_manager.next_request(self.remote_id)
         if block_to_request:
             message = Request(block_to_request.piece, block_to_request.offset, block_to_request.length).encode()
-
-            # logging.debug('Requesting block {block} for piece {piece} '
-            #             'of {length} bytes from peer {peer}'.format(
-            #  piece=block_to_request.piece,
-            #  block=block_to_request.offset,
-            #  length=block_to_request.length,
-            #  peer=self.remote_id))
 
             self.writer.write(message)
             await self.writer.drain()
@@ -137,8 +142,7 @@ class PeerConnection:
         buffer = b''
         tries = 0
 
-        # TODO make it time based
-        while len(buffer) < Handshake.length and tries < 20:
+        while len(buffer) < Handshake.length and tries < 10:
             tries += 1
             buffer += await self.reader.read(PeerStreamIterator.CHUNK_SIZE)
 
@@ -152,16 +156,21 @@ class PeerConnection:
 
         self.remote_id = response.client_id
 
-        logging.debug('Con {id} Handshake with peer was successful'.format(id=self.id))
+        logging.debug('Con {id} Handshake with peer was successful'.format(id=self.con_id))
         # return not used part of message
         return buffer[Handshake.length:]
 
-    async def _send_interested(self):
-        self.writer.write(Interested().encode())
+    async def _send_message(self, message):
+        self.writer.write(message)
         await self.writer.drain()
 
+
     async def _close_connection(self):
-        logging.debug('Con {idc} Closing peer {id}'.format(id=self.remote_id, idc=self.id))
+        logging.debug('Con {idc} Closing peer {id}'.format(idc=self.con_id, id=self.remote_id))
+        self.my_state.clear()
+        self.peer_state.clear()
+        self.piece_manager.remove_peer(self.remote_id)
+        self.remote_id = None
 
         if self.writer:
             self.writer.close()
@@ -439,8 +448,14 @@ class Bitfield:
         <len=0001+X><id=5><bitfield>
     """
 
-    def __init__(self, data: bytes):
-        self.bitfield = bitstring.BitArray(data)
+    def __init__(self, data: Union[bytes, bitstring.BitArray]):
+        if isinstance(data, bytes):
+            data = bitstring.BitArray(data)
+
+        if isinstance(data, bitstring.BitArray):
+            data = data.tobytes()
+
+        self.bitfield = data
 
     def encode(self):
         bits_length = len(self.bitfield)
