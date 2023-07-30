@@ -2,7 +2,7 @@
 
 Whole client is written in python using asyncio.
 
-Implemented Beps:
+Client adheres to these BEPS:
 
 The BitTorrent Protocol Specification (BEP 0003 ).
 
@@ -15,19 +15,15 @@ Tracker Returns Compact Peer Lists (BEP 0023).
 
 
 What needs fixing:
--Loading partially downloaded files is currently broken(Will start from start
-
--Currently is very slow and needs some profiling done.
+-Loading partially downloaded files is currently broken(Will start from start)
 
 -Cannot load torrent through magnet links nor get peers from DHT.
 
--Needs some memory tweaking to have some pieces loaded in memory (does not hold any pieces).
+Memory tweaking to have some pieces loaded in memory (does not hold any pieces).
 
 -Implement rare first piece algorithm.
 
 -Only one torrent per instance.
-
--Needs some little refractoring.
 
 
 For requirements:
