@@ -4,26 +4,26 @@ Whole client is written in python using asyncio.
 
 Client adheres to these BEPS:
 
-The BitTorrent Protocol Specification (BEP 0003 ).
+- The BitTorrent Protocol Specification (BEP 0003 ).
 
-Multitracker Metadata Extension (BEP 0012).
+- Multitracker Metadata Extension (BEP 0012).
 
-Scrape peers from UDP or HTTP trackers (BEP 15).
+- Scrape peers from UDP or HTTP trackers (BEP 15).
 
-Tracker Returns Compact Peer Lists (BEP 0023).
+- Tracker Returns Compact Peer Lists (BEP 0023).
 
 
 
 What needs fixing:
--Loading partially downloaded files is currently broken(Will start from start)
+- Loading partially downloaded files is currently broken(Will start from start)
 
--Cannot load torrent through magnet links nor get peers from DHT.
+- Cannot load torrent through magnet links nor get peers from DHT.
 
-Memory tweaking to have some pieces loaded in memory (does not hold any pieces).
+- Memory tweaking to have some pieces loaded in memory (does not hold any pieces).
 
--Implement rare first piece algorithm.
+- Implement rare first piece algorithm.
 
--Only one torrent per instance.
+- Only one torrent per instance.
 
 
 For requirements:
