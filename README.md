@@ -26,7 +26,7 @@ What needs fixing:
 - Only one torrent per instance.
 
 
-For requirements:
+To install requirements:
 
 pip install -r requirements.txt
 
